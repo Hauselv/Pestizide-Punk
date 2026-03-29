@@ -8,11 +8,12 @@ export interface TerrainVisualDefinition {
   shadow: string;
 }
 
-function variants(baseName: string) {
+function variants(baseName: string, includeV4 = false) {
   return [
     `/world-hex/tiles/${baseName}.png`,
     `/world-hex/tiles/${baseName}-v2.png`,
-    `/world-hex/tiles/${baseName}-v3.png`
+    `/world-hex/tiles/${baseName}-v3.png`,
+    ...(includeV4 ? [`/world-hex/tiles/${baseName}-v4.png`] : [])
   ];
 }
 
@@ -40,21 +41,21 @@ export const terrainAssetMap: Record<TerrainType, TerrainVisualDefinition> = {
   },
   "overgrown-ruins": {
     label: "Overgrown Ruins",
-    variants: variants("overgrown-ruins"),
+    variants: variants("overgrown-ruins", true),
     accent: "rgba(144, 122, 96, 0.24)",
     stroke: "rgba(210, 188, 154, 0.3)",
     shadow: "rgba(101, 81, 57, 0.2)"
   },
   "scavenger-scrapland": {
     label: "Scavenger Scrapland",
-    variants: variants("scavenger-scrapland"),
+    variants: variants("scavenger-scrapland", true),
     accent: "rgba(112, 169, 176, 0.2)",
     stroke: "rgba(181, 225, 229, 0.3)",
     shadow: "rgba(70, 115, 121, 0.22)"
   },
   "chemical-waste": {
     label: "Chemical Waste",
-    variants: variants("chemical-waste"),
+    variants: variants("chemical-waste", true),
     accent: "rgba(212, 112, 67, 0.26)",
     stroke: "rgba(238, 183, 136, 0.34)",
     shadow: "rgba(150, 70, 45, 0.24)"
@@ -82,7 +83,7 @@ export const terrainAssetMap: Record<TerrainType, TerrainVisualDefinition> = {
   },
   "neutral-rock": {
     label: "Neutral Rock",
-    variants: variants("neutral-rock"),
+    variants: variants("neutral-rock", true),
     accent: "rgba(130, 136, 142, 0.16)",
     stroke: "rgba(214, 218, 222, 0.24)",
     shadow: "rgba(77, 83, 91, 0.18)"

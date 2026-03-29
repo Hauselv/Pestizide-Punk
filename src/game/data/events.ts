@@ -6,7 +6,7 @@ export const eventDefinitions: EventDefinition[] = [
     title: "Toxic Storm Front",
     description: "Charged fallout clouds roll over the city, suppressing solar yield and pushing contaminants into the air.",
     severity: "major",
-    art: "/world-hex/regions/steam-fissures.png",
+    art: "/events/toxic-storm.png",
     baseDuration: 34,
     responses: [
       {
@@ -41,7 +41,7 @@ export const eventDefinitions: EventDefinition[] = [
     title: "Swarm Pressure",
     description: "Mutant insects mass at the perimeter and probe exposed food chains for weakness.",
     severity: "major",
-    art: "/world-hex/regions/toxic-forest.png",
+    art: "/events/swarm-pressure.png",
     baseDuration: 28,
     responses: [
       {
@@ -76,7 +76,7 @@ export const eventDefinitions: EventDefinition[] = [
     title: "Contamination Surge",
     description: "Runoff spikes through the pipes and turns every weak seal into a new source of poison.",
     severity: "extreme",
-    art: "/world-hex/regions/waste-basin.png",
+    art: "/events/contamination-surge.png",
     baseDuration: 30,
     responses: [
       {

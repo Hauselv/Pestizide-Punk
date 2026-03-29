@@ -82,3 +82,10 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Refined world readability with stronger selected/hovered tile treatment, clearer shadowed/known states, and more explicit city-core emphasis.
 - Updated simulation tests to cover the new crisis lifecycle and reactor slot unlock path.
 - Verification for this pass: `npx tsc --noEmit` passed, live browser QA confirmed forecast bands, locked reactor slots, reactor dossier, and the crisis modal flow. `npm run build` / `npm test` are currently blocked in this environment by a Vite/esbuild `spawn EPERM` startup error rather than TypeScript issues.
+- Verified that the latest local game state commit is already mirrored to GitHub: local `HEAD`, `origin/main`, and the remote branch all point to `e4ac34e`.
+- Added a focused ImageGen pass for missing art gaps instead of a broad undirected batch.
+- Generated and integrated three dedicated crisis artworks under `public/events`: Toxic Storm, Swarm Pressure, and Contamination Surge, replacing the earlier region-art fallbacks in the event data.
+- Generated and wired unique building icons for several previously shared-icon Wave-2 buildings: Biogas Digester, Steam Accumulator, Glassworks, Compost Yard, Beneficial Fungi Lab, Pollinator Dome, Fish Tanks, Algae Bioreactor, Mycoprotein Vats, Pheromone Hub, Soil Sterilizer Rig, and Vehicle Seal Bay.
+- Added fourth terrain variants for `neutral-rock`, `chemical-waste`, `overgrown-ruins`, and `scavenger-scrapland` to reduce visual repetition in the world hex map.
+- Updated `buildingVisuals.ts`, `events.ts`, and `terrainAssets.ts` so the newly generated assets are now used directly by the live UI.
+- Verification for this asset pass: `npx tsc --noEmit` passed, browser QA loaded the updated app cleanly with no Playwright console errors, and the new event-art/terrain/icon assets are present in `public/` and visible in the running build.
