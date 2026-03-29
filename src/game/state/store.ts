@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { buildingDefinitions, districtSlots, startingBuildings } from "../data/buildings";
 import { researchNodes, startingResearch } from "../data/research";
-import { sectorDefinitions } from "../data/sectors";
+import { regionDefinitions } from "../data/sectors";
+import { worldHexes } from "../data/worldHexes";
 import type {
   ActiveEvent,
   ActiveResearch,
@@ -11,17 +12,18 @@ import type {
   Expedition,
   ExpeditionKind,
   HazardId,
+  RegionDefinition,
   ResourceFlow,
   ResourceId,
   RoleId,
-  SectorDefinition,
   SnapshotState,
   ViewMode
 } from "../types";
 
-const STORAGE_KEY = 'pestizide-punk-save-v2';
+const STORAGE_KEY = "pestizide-punk-save-v4";
 const BUILDING_RATE_SCALE = 0.15;
-const SECTOR_RATE_SCALE = 0.15;
+const REGION_RATE_SCALE = 0.15;
+const MAX_BUILDING_LEVEL = 2;
 const EVENT_SEQUENCE: ActiveEvent[] = [
   {
     id: "toxic-storm",
@@ -45,11 +47,13 @@ const EVENT_SEQUENCE: ActiveEvent[] = [
 
 interface GameStore extends SnapshotState {
   setView: (view: ViewMode) => void;
-  selectSector: (sectorId: string) => void;
+  selectRegion: (regionId: string) => void;
   selectSlot: (slotId: string) => void;
   buildInSlot: (slotId: string, buildingId: string) => void;
+  toggleBuilding: (slotId: string) => void;
+  upgradeBuilding: (slotId: string) => void;
   startResearch: (nodeId: string) => void;
-  launchExpedition: (sectorId: string, kind: ExpeditionKind) => void;
+  launchExpedition: (regionId: string, kind: ExpeditionKind) => void;
   setSpeed: (speed: number) => void;
   advanceTime: (ms: number) => void;
   saveGame: () => void;
@@ -61,9 +65,9 @@ const buildingMap = Object.fromEntries(
   buildingDefinitions.map((definition) => [definition.id, definition])
 ) as Record<string, BuildingDefinition>;
 
-const sectorMap = Object.fromEntries(
-  sectorDefinitions.map((sector) => [sector.id, sector])
-) as Record<string, SectorDefinition>;
+const regionMap = Object.fromEntries(
+  regionDefinitions.map((region) => [region.id, region])
+) as Record<string, RegionDefinition>;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -79,6 +83,27 @@ function appendAlert(alerts: AlertMessage[], alert: AlertMessage) {
 
 function hasResearch(state: SnapshotState, techId: string) {
   return state.researched.includes(techId);
+}
+
+function getBuildingMultiplier(level: number) {
+  return 1 + (level - 1) * 0.5;
+}
+
+function scaleValues<T extends string>(flow: Partial<Record<T, number>> | undefined, multiplier: number) {
+  const scaled: Partial<Record<T, number>> = {};
+  if (!flow) return scaled;
+  Object.entries(flow).forEach(([key, amount]) => {
+    scaled[key as T] = Number(amount ?? 0) * multiplier;
+  });
+  return scaled;
+}
+
+function getUpgradeCost(definition: BuildingDefinition, level: number) {
+  const cost: ResourceFlow = {};
+  Object.entries(definition.cost).forEach(([resourceId, amount]) => {
+    cost[resourceId as ResourceId] = Math.max(1, Math.ceil(Number(amount ?? 0) * 0.8 * level));
+  });
+  return cost;
 }
 
 function getUsedRoles(state: SnapshotState) {
@@ -127,7 +152,8 @@ function getCityMitigation(state: SnapshotState) {
   state.buildings.forEach((instance) => {
     if (!instance.enabled) return;
     const definition = buildingMap[instance.buildingId];
-    Object.entries(definition.hazardMitigation ?? {}).forEach(([hazard, amount]) => {
+    const scaledMitigation = scaleValues(definition.hazardMitigation, getBuildingMultiplier(instance.level));
+    Object.entries(scaledMitigation).forEach(([hazard, amount]) => {
       mitigation[hazard as HazardId] += Number(amount ?? 0);
     });
   });
@@ -149,7 +175,7 @@ function applyFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow, m
   });
 }
 
-function meetsRequirement(state: SnapshotState, requirement: SectorDefinition["access"]) {
+function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["access"]) {
   const techOk = (requirement.tech ?? []).every((techId) => hasResearch(state, techId));
   const gearTier = state.resources.gear >= 10 ? 2 : state.resources.gear >= 4 ? 1 : 0;
   return techOk && gearTier >= (requirement.gear ?? 0);
@@ -170,14 +196,14 @@ function createInitialState(): SnapshotState {
       gear: 4
     },
     view: "world",
-    selectedSectorId: "toxic-forest",
+    selectedRegionId: "toxic-forest",
     selectedSlotId: null,
     districts: districtSlots,
     buildings: startingBuildings,
-    sectors: sectorDefinitions.map((sector) => ({
-      id: sector.id,
+    regions: regionDefinitions.map((region) => ({
+      id: region.id,
       state: "known" as const,
-      discovered: sector.ring === 1
+      discovered: region.ring === 1
     })),
     researched: [...startingResearch],
     activeResearch: null,
@@ -195,15 +221,15 @@ function createInitialState(): SnapshotState {
         rangers: 10
       }
     },
-    speed: 1,
+    speed: 0,
     alerts: [
       {
         id: "tutorial",
         tone: "info",
-        text: "Survey ring-1 sectors, unlock filter masks, then exploit biomass and salvage."
+        text: "Survey nearby hex-regions, unlock filter masks, then exploit biomass and salvage."
       }
     ],
-    log: ["City council briefing ready. Reactor output stable. First ring sectors await survey."]
+    log: ["City council briefing ready. Reactor output stable. Hex frontier awaits survey."]
   };
 }
 
@@ -228,19 +254,18 @@ function saveState(state: SnapshotState) {
 }
 
 function cleanResourceBounds(state: SnapshotState) {
-  const resourceIds = Object.keys(state.resources) as ResourceId[];
-  resourceIds.forEach((resourceId) => {
+  (Object.keys(state.resources) as ResourceId[]).forEach((resourceId) => {
     state.resources[resourceId] = clamp(state.resources[resourceId], 0, 999);
   });
 }
 
-function createExpedition(kind: ExpeditionKind, sectorId: string): Expedition {
+function createExpedition(kind: ExpeditionKind, regionId: string): Expedition {
   const baseDuration =
     kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
 
   return {
-    id: `${kind}-${sectorId}-${Math.random().toString(36).slice(2, 7)}`,
-    sectorId,
+    id: `${kind}-${regionId}-${Math.random().toString(36).slice(2, 7)}`,
+    regionId,
     kind,
     remaining: baseDuration,
     total: baseDuration,
@@ -279,51 +304,52 @@ function tickState(state: SnapshotState, seconds: number) {
   state.buildings.forEach((instance) => {
     if (!instance.enabled) return;
     const definition = buildingMap[instance.buildingId];
-    const multiplier =
+    const buildingMultiplier = getBuildingMultiplier(instance.level) * BUILDING_RATE_SCALE;
+    const weatherMultiplier =
       activeEvent?.id === "toxic-storm" && instance.buildingId === "solar-array" ? 0.35 : 1;
     Object.entries(definition.upkeep ?? {}).forEach(([resourceId, amount]) => {
-      baseDelta[resourceId as ResourceId] -= Number(amount ?? 0) * multiplier * BUILDING_RATE_SCALE;
+      baseDelta[resourceId as ResourceId] -= Number(amount ?? 0) * weatherMultiplier * buildingMultiplier;
     });
     Object.entries(definition.output ?? {}).forEach(([resourceId, amount]) => {
-      baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * multiplier * BUILDING_RATE_SCALE;
+      baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * weatherMultiplier * buildingMultiplier;
     });
   });
 
-  state.sectors.forEach((sectorRuntime) => {
-    const definition = sectorMap[sectorRuntime.id];
-    if (sectorRuntime.state === "exploiting" || sectorRuntime.state === "secured") {
+  state.regions.forEach((regionRuntime) => {
+    const definition = regionMap[regionRuntime.id];
+    if (regionRuntime.state === "exploiting" || regionRuntime.state === "secured") {
       Object.entries(definition.resources).forEach(([resourceId, amount]) => {
         if (resourceId in baseDelta) {
-          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * 0.5 * SECTOR_RATE_SCALE;
+          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * 0.5 * REGION_RATE_SCALE;
         }
       });
     }
-    if (sectorRuntime.state === "outpost") {
+    if (regionRuntime.state === "outpost") {
       Object.entries(definition.resources).forEach(([resourceId, amount]) => {
         if (resourceId in baseDelta) {
-          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * SECTOR_RATE_SCALE;
+          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * REGION_RATE_SCALE;
         }
       });
     }
   });
 
   if (activeEvent?.id === "toxic-storm") {
-    baseDelta.energy -= 1;
+    baseDelta.energy -= 0.3;
     state.population.contamination += Math.max(0.05, 0.12 - mitigation.toxicity * 0.03) * dt;
   }
 
   if (activeEvent?.id === "swarm-raid") {
-    const sprayTowerCount = state.buildings.filter(
+    const sprayTowerScore = state.buildings.filter(
       (instance) => instance.enabled && instance.buildingId === "spray-tower"
-    ).length;
-    if (sprayTowerCount === 0) {
-      baseDelta.food -= 0.4;
+    ).reduce((sum, instance) => sum + instance.level, 0);
+    if (sprayTowerScore === 0) {
+      baseDelta.food -= 0.2;
       state.population.stability -= 0.12 * dt;
     }
   }
 
   if (activeEvent?.id === "contamination-surge") {
-    baseDelta.water -= 0.4;
+    baseDelta.water -= 0.2;
     state.population.contamination += Math.max(0.04, 0.1 - mitigation.spores * 0.02) * dt;
   }
 
@@ -345,10 +371,10 @@ function tickState(state: SnapshotState, seconds: number) {
     state.population.stability -= 0.18 * dt;
   }
 
-  const clinicCount = state.buildings.filter(
-    (instance) => instance.enabled && instance.buildingId === "clinic"
-  ).length;
-  state.population.contamination -= clinicCount * 0.08 * dt;
+  const clinicScore = state.buildings
+    .filter((instance) => instance.enabled && instance.buildingId === "clinic")
+    .reduce((sum, instance) => sum + instance.level, 0);
+  state.population.contamination -= clinicScore * 0.08 * dt;
 
   if (state.population.contamination > 40) {
     state.population.health -= 0.12 * dt;
@@ -376,37 +402,34 @@ function tickState(state: SnapshotState, seconds: number) {
     .filter((expedition) => {
       if (expedition.remaining > 0) return true;
 
-      const sectorRuntime = state.sectors.find((sector) => sector.id === expedition.sectorId);
-      const sectorDefinition = sectorMap[expedition.sectorId];
-      if (!sectorRuntime || !sectorDefinition) return false;
+      const regionRuntime = state.regions.find((region) => region.id === expedition.regionId);
+      const regionDefinition = regionMap[expedition.regionId];
+      if (!regionRuntime || !regionDefinition) return false;
 
       if (expedition.kind === "survey") {
-        sectorRuntime.state = "surveyed";
-        sectorRuntime.discovered = true;
-        applyFlow(state.resources, sectorDefinition.surveyReward);
+        regionRuntime.state = "surveyed";
+        regionRuntime.discovered = true;
+        applyFlow(state.resources, regionDefinition.surveyReward);
       }
 
       if (expedition.kind === "exploit") {
-        sectorRuntime.state = "exploiting";
+        regionRuntime.state = "exploiting";
       }
 
       if (expedition.kind === "secure") {
-        sectorRuntime.state = "secured";
-        applyFlow(state.resources, sectorDefinition.secureReward);
+        regionRuntime.state = "secured";
+        applyFlow(state.resources, regionDefinition.secureReward);
       }
 
       if (expedition.kind === "outpost") {
-        sectorRuntime.state = "outpost";
+        regionRuntime.state = "outpost";
       }
 
-      state.log = appendLog(
-        state.log,
-        `${sectorDefinition.name}: ${expedition.kind} mission completed.`
-      );
+      state.log = appendLog(state.log, `${regionDefinition.name}: ${expedition.kind} mission completed.`);
       state.alerts = appendAlert(state.alerts, {
         id: `expedition-${expedition.id}`,
         tone: "success",
-        text: `${sectorDefinition.name} ${expedition.kind} mission completed.`
+        text: `${regionDefinition.name} ${expedition.kind} mission completed.`
       });
       return false;
     });
@@ -462,11 +485,11 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     elapsedSeconds: state.elapsedSeconds,
     resources: { ...state.resources },
     view: state.view,
-    selectedSectorId: state.selectedSectorId,
+    selectedRegionId: state.selectedRegionId,
     selectedSlotId: state.selectedSlotId,
     districts: state.districts.map((slot) => ({ ...slot })),
     buildings: state.buildings.map((building) => ({ ...building })),
-    sectors: state.sectors.map((sector) => ({ ...sector })),
+    regions: state.regions.map((region) => ({ ...region })),
     researched: [...state.researched],
     activeResearch: state.activeResearch ? { ...state.activeResearch } : null,
     expeditions: state.expeditions.map((expedition) => ({
@@ -483,6 +506,7 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     log: [...state.log]
   };
 }
+
 function makeStoreState(): SnapshotState {
   return loadState() ?? createInitialState();
 }
@@ -492,7 +516,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setView: (view) => set({ view }),
 
-  selectSector: (sectorId) => set({ selectedSectorId: sectorId, view: "world" }),
+  selectRegion: (regionId) => set({ selectedRegionId: regionId, view: "world" }),
 
   selectSlot: (slotId) => set({ selectedSlotId: slotId, view: "city" }),
 
@@ -534,7 +558,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const nextState = {
         ...state,
         resources,
-        buildings: [...state.buildings, { slotId, buildingId, enabled: true } as BuildingInstance],
+        buildings: [...state.buildings, { slotId, buildingId, enabled: true, level: 1 } as BuildingInstance],
         log: appendLog(state.log, `${definition.name} commissioned at ${slot.label}.`),
         alerts: appendAlert(state.alerts, {
           id: `build-${slotId}`,
@@ -542,6 +566,86 @@ export const useGameStore = create<GameStore>((set, get) => ({
           text: `${definition.name} built at ${slot.label}.`
         }),
         selectedSlotId: slotId
+      };
+      saveState(nextState);
+      return nextState;
+    }),
+
+  toggleBuilding: (slotId) =>
+    set((state) => {
+      const building = state.buildings.find((item) => item.slotId === slotId);
+      if (!building) return state;
+      const definition = buildingMap[building.buildingId];
+      if (building.enabled) {
+        const nextState = {
+          ...state,
+          buildings: state.buildings.map((item) =>
+            item.slotId === slotId ? { ...item, enabled: false } : item
+          ),
+          log: appendLog(state.log, `${definition.name} put on standby.`)
+        };
+        saveState(nextState);
+        return nextState;
+      }
+
+      const freeRoles = getFreeRoles(state);
+      const staffOk = Object.entries(definition.staff).every(
+        ([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0)
+      );
+      if (!staffOk) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, {
+            id: `reactivate-${slotId}`,
+            tone: "warning",
+            text: `Not enough free staff to reactivate ${definition.name}.`
+          })
+        };
+      }
+
+      const nextState = {
+        ...state,
+        buildings: state.buildings.map((item) =>
+          item.slotId === slotId ? { ...item, enabled: true } : item
+        ),
+        log: appendLog(state.log, `${definition.name} brought back online.`)
+      };
+      saveState(nextState);
+      return nextState;
+    }),
+
+  upgradeBuilding: (slotId) =>
+    set((state) => {
+      const building = state.buildings.find((item) => item.slotId === slotId);
+      if (!building) return state;
+      if (building.level >= MAX_BUILDING_LEVEL) return state;
+      const definition = buildingMap[building.buildingId];
+      const upgradeCost = getUpgradeCost(definition, building.level);
+      if (!canAfford(state.resources, upgradeCost)) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, {
+            id: `upgrade-${slotId}`,
+            tone: "warning",
+            text: `Insufficient stock to upgrade ${definition.name}.`
+          })
+        };
+      }
+
+      const resources = { ...state.resources };
+      applyFlow(resources, upgradeCost, -1);
+      const nextState = {
+        ...state,
+        resources,
+        buildings: state.buildings.map((item) =>
+          item.slotId === slotId ? { ...item, level: item.level + 1 } : item
+        ),
+        log: appendLog(state.log, `${definition.name} upgraded to level ${building.level + 1}.`),
+        alerts: appendAlert(state.alerts, {
+          id: `upgrade-ok-${slotId}`,
+          tone: "success",
+          text: `${definition.name} upgraded to level ${building.level + 1}.`
+        })
       };
       saveState(nextState);
       return nextState;
@@ -573,34 +677,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
-  launchExpedition: (sectorId, kind) =>
+  launchExpedition: (regionId, kind) =>
     set((state) => {
-      const sectorDefinition = sectorMap[sectorId];
-      const sectorRuntime = state.sectors.find((item) => item.id === sectorId);
-      if (!sectorDefinition || !sectorRuntime) return state;
+      const regionDefinition = regionMap[regionId];
+      const regionRuntime = state.regions.find((item) => item.id === regionId);
+      if (!regionDefinition || !regionRuntime) return state;
 
       const requirement =
         kind === "survey"
-          ? sectorDefinition.access
+          ? regionDefinition.access
           : kind === "exploit"
-            ? sectorDefinition.exploit
+            ? regionDefinition.exploit
             : kind === "secure"
-              ? sectorDefinition.secure
+              ? regionDefinition.secure
               : { tech: ["relay-network"] };
 
       if (!meetsRequirement(state, requirement)) {
         return {
           ...state,
           alerts: appendAlert(state.alerts, {
-            id: `requirement-${sectorId}-${kind}`,
+            id: `requirement-${regionId}-${kind}`,
             tone: "warning",
-            text: `${sectorDefinition.name} needs more tech or gear for ${kind}.`
+            text: `${regionDefinition.name} needs more tech or gear for ${kind}.`
           })
         };
       }
 
-      if (state.expeditions.some((item) => item.sectorId === sectorId)) return state;
-      const expedition = createExpedition(kind, sectorId);
+      if (state.expeditions.some((item) => item.regionId === regionId)) return state;
+      const expedition = createExpedition(kind, regionId);
       const freeRoles = getFreeRoles(state);
       const staffOk = Object.entries(expedition.staff).every(
         ([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0)
@@ -609,7 +713,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
         return {
           ...state,
           alerts: appendAlert(state.alerts, {
-            id: `expedition-staff-${sectorId}`,
+            id: `expedition-staff-${regionId}`,
             tone: "warning",
             text: `Not enough free staff for ${kind} mission.`
           })
@@ -618,13 +722,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const nextState = {
         ...state,
-        sectors: state.sectors.map((sector) =>
-          sector.id === sectorId && kind === "survey"
-            ? { ...sector, state: "surveying" as const }
-            : sector
+        regions: state.regions.map((region) =>
+          region.id === regionId && kind === "survey"
+            ? { ...region, state: "surveying" as const }
+            : region
         ),
         expeditions: [...state.expeditions, expedition],
-        log: appendLog(state.log, `${sectorDefinition.name}: ${kind} mission launched.`)
+        log: appendLog(state.log, `${regionDefinition.name}: ${kind} mission launched.`)
       };
       saveState(nextState);
       return nextState;
@@ -635,8 +739,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   advanceTime: (ms) =>
     set((state) => {
       const nextState = cloneSnapshot(state);
-      const seconds = ms / 1000;
-      tickState(nextState, seconds);
+      tickState(nextState, ms / 1000);
       saveState(nextState);
       return nextState;
     }),
@@ -654,10 +757,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
   renderToText: () => {
     const state = get();
     return JSON.stringify({
-      coordinateSystem: "world-map center origin in screen percentages, x right, y down",
+      coordinateSystem: "world map uses axial hex coordinates with screen origin centered in the board, x right, y down",
       mode: state.view,
       elapsedSeconds: state.elapsedSeconds,
-      selectedSectorId: state.selectedSectorId,
+      selectedRegionId: state.selectedRegionId,
       selectedSlotId: state.selectedSlotId,
       resources: state.resources,
       population: {
@@ -666,23 +769,34 @@ export const useGameStore = create<GameStore>((set, get) => ({
         stability: state.population.stability,
         freeRoles: getFreeRoles(state)
       },
+      buildings: state.buildings.map((building) => ({
+        slotId: building.slotId,
+        buildingId: building.buildingId,
+        level: building.level,
+        enabled: building.enabled
+      })),
       activeResearch: state.activeResearch,
       activeEvent: state.activeEvent?.title ?? null,
       expeditions: state.expeditions.map((item) => ({
-        sectorId: item.sectorId,
+        regionId: item.regionId,
         kind: item.kind,
         remaining: item.remaining
       })),
-      sectors: state.sectors.map((sector) => ({
-        id: sector.id,
-        state: sector.state,
-        discovered: sector.discovered
+      regions: state.regions.map((region) => ({
+        id: region.id,
+        state: region.state,
+        discovered: region.discovered,
+        hexCount: regionMap[region.id]?.hexTileIds.length ?? 0
       })),
+      worldHexes: {
+        total: worldHexes.length,
+        discovered: worldHexes.filter((tile) => {
+          if (tile.isCityCore) return true;
+          if (!tile.regionId) return false;
+          return state.regions.find((region) => region.id === tile.regionId)?.discovered;
+        }).length
+      },
       alerts: state.alerts.map((alert) => alert.text)
     });
   }
 }));
-
-
-
-

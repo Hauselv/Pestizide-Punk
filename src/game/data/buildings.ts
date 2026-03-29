@@ -159,9 +159,10 @@ export const buildingDefinitions: BuildingDefinition[] = [
 ];
 
 export const startingBuildings = [
-  { slotId: "north-west", buildingId: "field-lab", enabled: true },
-  { slotId: "west", buildingId: "scrap-foundry", enabled: true },
-  { slotId: "south-west", buildingId: "water-purifier", enabled: true },
-  { slotId: "south", buildingId: "worker-barracks", enabled: true }
+  { slotId: "north-west", buildingId: "field-lab", enabled: true, level: 1 },
+  { slotId: "west", buildingId: "scrap-foundry", enabled: true, level: 1 },
+  { slotId: "south-west", buildingId: "water-purifier", enabled: true, level: 1 },
+  { slotId: "south", buildingId: "worker-barracks", enabled: true, level: 1 }
 ];
+
 

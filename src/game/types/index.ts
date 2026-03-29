@@ -12,6 +12,17 @@ export type ResourceId =
 export type RoleId = "workers" | "technicians" | "researchers" | "rangers";
 export type ViewMode = "world" | "city" | "research";
 export type HazardId = "toxicity" | "spores" | "radiation" | "infestation";
+export type TerrainType =
+  | "city-core"
+  | "toxic-forest"
+  | "fungal-wetlands"
+  | "overgrown-ruins"
+  | "scavenger-scrapland"
+  | "chemical-waste"
+  | "irradiated-badlands"
+  | "industrial-hulk"
+  | "mutant-nest"
+  | "neutral-rock";
 export type BuildingCategory =
   | "energy"
   | "production"
@@ -52,6 +63,7 @@ export interface BuildingInstance {
   slotId: string;
   buildingId: string;
   enabled: boolean;
+  level: number;
 }
 
 export interface DistrictSlot {
@@ -66,7 +78,22 @@ export interface SectorActionRequirement {
   gear?: number;
 }
 
-export type SectorStateId =
+export interface HexCoord {
+  q: number;
+  r: number;
+}
+
+export interface HexTileDefinition extends HexCoord {
+  id: string;
+  terrainType: TerrainType;
+  regionId: string | null;
+  decorVariant: number;
+  dangerTint?: string;
+  isCityCore?: boolean;
+  isVisible?: boolean;
+}
+
+export type RegionStateId =
   | "known"
   | "surveying"
   | "surveyed"
@@ -74,12 +101,13 @@ export type SectorStateId =
   | "secured"
   | "outpost";
 
-export interface SectorDefinition {
+export interface RegionDefinition {
   id: string;
   name: string;
   archetype: string;
   ring: number;
-  angle: number;
+  primaryTerrain: TerrainType;
+  secondaryTerrains?: TerrainType[];
   description: string;
   hazard: HazardProfile;
   resources: ResourceFlow;
@@ -88,11 +116,12 @@ export interface SectorDefinition {
   access: SectorActionRequirement;
   exploit: SectorActionRequirement;
   secure: SectorActionRequirement;
+  hexTileIds: string[];
 }
 
-export interface SectorRuntime {
+export interface RegionRuntime {
   id: string;
-  state: SectorStateId;
+  state: RegionStateId;
   discovered: boolean;
 }
 
@@ -116,7 +145,7 @@ export type ExpeditionKind = "survey" | "exploit" | "secure" | "outpost";
 
 export interface Expedition {
   id: string;
-  sectorId: string;
+  regionId: string;
   kind: ExpeditionKind;
   remaining: number;
   total: number;
@@ -150,11 +179,11 @@ export interface SnapshotState {
   elapsedSeconds: number;
   resources: Record<ResourceId, number>;
   view: ViewMode;
-  selectedSectorId: string | null;
+  selectedRegionId: string | null;
   selectedSlotId: string | null;
   districts: DistrictSlot[];
   buildings: BuildingInstance[];
-  sectors: SectorRuntime[];
+  regions: RegionRuntime[];
   researched: string[];
   activeResearch: ActiveResearch | null;
   expeditions: Expedition[];

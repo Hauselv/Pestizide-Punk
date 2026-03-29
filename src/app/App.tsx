@@ -1,16 +1,36 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { buildingDefinitions, districtSlots } from "../game/data/buildings";
 import { resourceDefinitions } from "../game/data/resources";
 import { researchNodes } from "../game/data/research";
-import { sectorDefinitions } from "../game/data/sectors";
+import { regionDefinitions } from "../game/data/sectors";
+import { terrainAssetMap } from "../game/data/terrainAssets";
+import { worldHexes } from "../game/data/worldHexes";
 import { useGameStore } from "../game/state/store";
-import type { BuildingDefinition, ExpeditionKind, ResourceId, SectorStateId, ViewMode } from "../game/types";
+import type {
+  BuildingDefinition,
+  BuildingInstance,
+  Expedition,
+  ExpeditionKind,
+  HexCoord,
+  HexTileDefinition,
+  RegionStateId,
+  ResourceFlow,
+  ResourceId,
+  RoleId,
+  SectorActionRequirement,
+  TerrainType,
+  ViewMode
+} from "../game/types";
 
 const buildingMap = Object.fromEntries(
   buildingDefinitions.map((definition) => [definition.id, definition])
 ) as Record<string, BuildingDefinition>;
 
-const sectorStateLabel: Record<SectorStateId, string> = {
+const regionMap = Object.fromEntries(
+  regionDefinitions.map((definition) => [definition.id, definition])
+);
+
+const regionStateLabel: Record<RegionStateId, string> = {
   known: "Known",
   surveying: "Surveying",
   surveyed: "Surveyed",
@@ -20,10 +40,140 @@ const sectorStateLabel: Record<SectorStateId, string> = {
 };
 
 const speedOptions = [0, 1, 2, 4];
+const HEX_SIZE = 41;
+const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
+const WORLD_PADDING = HEX_SIZE * 2.6;
+const TERRAIN_TYPES = [...new Set(worldHexes.map((tile) => tile.terrainType))] as TerrainType[];
 
 function formatResource(value: number) {
   return value.toFixed(value < 10 ? 1 : 0);
 }
+
+function buildingMultiplier(level: number) {
+  return 1 + (level - 1) * 0.5;
+}
+
+function formatFlow(flow?: ResourceFlow, level = 1, asCost = false) {
+  if (!flow || Object.keys(flow).length === 0) return ["None"];
+  return Object.entries(flow).map(([resourceId, amount]) => {
+    const label = resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId;
+    const base = Number(amount ?? 0) * buildingMultiplier(level);
+    const scaled = asCost ? -Math.abs(base) : base;
+    const prefix = scaled >= 0 ? "+" : "";
+    return `${label} ${prefix}${scaled.toFixed(scaled % 1 === 0 ? 0 : 1)}`;
+  });
+}
+
+function getFreeRoles(buildings: BuildingInstance[], expeditions: Expedition[], roles: Record<RoleId, number>) {
+  const used: Record<RoleId, number> = {
+    workers: 0,
+    technicians: 0,
+    researchers: 0,
+    rangers: 0
+  };
+
+  buildings.forEach((building) => {
+    if (!building.enabled) return;
+    const definition = buildingMap[building.buildingId];
+    Object.entries(definition.staff).forEach(([role, amount]) => {
+      used[role as RoleId] += Number(amount ?? 0);
+    });
+  });
+
+  expeditions.forEach((expedition) => {
+    Object.entries(expedition.staff).forEach(([role, amount]) => {
+      used[role as RoleId] += Number(amount ?? 0);
+    });
+  });
+
+  return {
+    workers: roles.workers - used.workers,
+    technicians: roles.technicians - used.technicians,
+    researchers: roles.researchers - used.researchers,
+    rangers: roles.rangers - used.rangers
+  };
+}
+
+function getRequirementSummary(requirement: SectorActionRequirement, researched: string[], gear: number) {
+  const parts: string[] = [];
+  const gearTier = gear >= 10 ? 2 : gear >= 4 ? 1 : 0;
+  if ((requirement.tech ?? []).length > 0) {
+    parts.push(
+      ...(requirement.tech ?? []).map((techId) => {
+        const name = researchNodes.find((node) => node.id === techId)?.name ?? techId;
+        return `${researched.includes(techId) ? "Ready" : "Missing"}: ${name}`;
+      })
+    );
+  }
+  if (requirement.gear) {
+    parts.push(`${gearTier >= requirement.gear ? "Ready" : "Missing"}: Gear tier ${requirement.gear}`);
+  }
+  return parts.length > 0 ? parts : ["No extra requirements"];
+}
+
+function getBlockedReason(requirement: SectorActionRequirement, researched: string[], gear: number) {
+  const missing = getRequirementSummary(requirement, researched, gear).filter((item) => item.startsWith("Missing"));
+  return missing.length > 0 ? missing.join(" / ") : "Requirements met";
+}
+
+function hexToPixel(coord: HexCoord) {
+  return {
+    x: HEX_SIZE * Math.sqrt(3) * (coord.q + coord.r / 2),
+    y: HEX_SIZE * 1.5 * coord.r
+  };
+}
+
+function getHexPoints(center: { x: number; y: number }) {
+  const points: string[] = [];
+  for (let index = 0; index < 6; index += 1) {
+    const angle = ((60 * index - 30) * Math.PI) / 180;
+    points.push(`${center.x + HEX_SIZE * Math.cos(angle)},${center.y + HEX_SIZE * Math.sin(angle)}`);
+  }
+  return points.join(" ");
+}
+
+const worldGeometry = (() => {
+  const projected = worldHexes.map((tile) => {
+    const center = hexToPixel(tile);
+    return { ...tile, center, points: getHexPoints(center) };
+  });
+
+  const bounds = projected.reduce(
+    (acc, tile) => ({
+      minX: Math.min(acc.minX, tile.center.x - HEX_WIDTH / 2),
+      maxX: Math.max(acc.maxX, tile.center.x + HEX_WIDTH / 2),
+      minY: Math.min(acc.minY, tile.center.y - HEX_SIZE),
+      maxY: Math.max(acc.maxY, tile.center.y + HEX_SIZE)
+    }),
+    { minX: Number.POSITIVE_INFINITY, maxX: Number.NEGATIVE_INFINITY, minY: Number.POSITIVE_INFINITY, maxY: Number.NEGATIVE_INFINITY }
+  );
+
+  const width = bounds.maxX - bounds.minX + WORLD_PADDING * 2;
+  const height = bounds.maxY - bounds.minY + WORLD_PADDING * 2;
+  const offsetX = WORLD_PADDING - bounds.minX;
+  const offsetY = WORLD_PADDING - bounds.minY;
+
+  const normalized = projected.map((tile) => {
+    const center = { x: tile.center.x + offsetX, y: tile.center.y + offsetY };
+    return { ...tile, center, points: getHexPoints(center) };
+  });
+
+  return { width, height, tiles: normalized };
+})();
+
+const tileMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [tile.id, tile])) as Record<string, HexTileDefinition & { center: { x: number; y: number }; points: string }>;
+
+const regionCenters = Object.fromEntries(
+  regionDefinitions.map((region) => {
+    const regionTiles = region.hexTileIds.map((tileId) => tileMap[tileId]).filter(Boolean);
+    const center = regionTiles.reduce(
+      (acc, tile) => ({ x: acc.x + tile.center.x, y: acc.y + tile.center.y }),
+      { x: 0, y: 0 }
+    );
+    const divisor = Math.max(1, regionTiles.length);
+    return [region.id, { x: center.x / divisor, y: center.y / divisor }];
+  })
+) as Record<string, { x: number; y: number }>;
 
 function ResourceHud() {
   const resources = useGameStore((state) => state.resources);
@@ -63,65 +213,153 @@ function ResourceHud() {
 }
 
 function WorldMap() {
-  const sectors = useGameStore((state) => state.sectors);
-  const selectedSectorId = useGameStore((state) => state.selectedSectorId);
-  const selectSector = useGameStore((state) => state.selectSector);
+  const regions = useGameStore((state) => state.regions);
+  const selectedRegionId = useGameStore((state) => state.selectedRegionId);
+  const selectRegion = useGameStore((state) => state.selectRegion);
   const setView = useGameStore((state) => state.setView);
+  const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
+
+  const regionRuntimeMap = useMemo(
+    () => Object.fromEntries(regions.map((region) => [region.id, region])),
+    [regions]
+  );
+
+  const discoveredRegions = regions.filter((region) => region.discovered).length;
 
   return (
-    <section className="canvas-card">
+    <section className="canvas-card world-card">
       <div className="panel-header">
         <div>
           <p className="eyebrow">World Overview</p>
-          <h2>Hazard Rings</h2>
+          <h2>Hex Frontier Board</h2>
         </div>
-        <button className="ghost-button" onClick={() => setView("city")}>
-          Enter City
-        </button>
+        <div className="world-toolbar">
+          <span className="status-pill ghost">{discoveredRegions}/{regions.length} regions charted</span>
+          <button className="ghost-button" onClick={() => setView("city")}>
+            Enter City
+          </button>
+        </div>
       </div>
-      <svg className="map-svg" viewBox="0 0 100 100" role="img" aria-label="World overview map">
-        <defs>
-          <radialGradient id="reactorGlow">
-            <stop offset="0%" stopColor="#ffda73" stopOpacity="0.85" />
-            <stop offset="100%" stopColor="#d55b2c" stopOpacity="0" />
-          </radialGradient>
-        </defs>
-        <circle cx="50" cy="50" r="38" className="ring ring-outer" />
-        <circle cx="50" cy="50" r="24" className="ring ring-inner" />
-        <circle cx="50" cy="50" r="12" fill="url(#reactorGlow)" />
-        <g className="city-node" onClick={() => setView("city")} role="button" tabIndex={0}>
-          <circle cx="50" cy="50" r="8.2" />
-          <text x="50" y="51.5" textAnchor="middle">
-            City
-          </text>
-        </g>
-        {sectorDefinitions.map((sector) => {
-          const runtime = sectors.find((item) => item.id === sector.id)!;
-          const radius = sector.ring === 1 ? 24 : 38;
-          const radians = (sector.angle * Math.PI) / 180;
-          const x = 50 + Math.cos(radians) * radius;
-          const y = 50 + Math.sin(radians) * radius;
-          const className = [
-            "sector-node",
-            `sector-${runtime.state}`,
-            selectedSectorId === sector.id ? "selected" : ""
-          ]
-            .filter(Boolean)
-            .join(" ");
+      <div className="world-frame">
+        <svg
+          className="world-svg"
+          viewBox={`0 0 ${worldGeometry.width} ${worldGeometry.height}`}
+          role="img"
+          aria-label="Hex world overview map"
+        >
+          <defs>
+            <radialGradient id="worldGlow" cx="50%" cy="44%" r="65%">
+              <stop offset="0%" stopColor="rgba(255, 192, 96, 0.26)" />
+              <stop offset="100%" stopColor="rgba(13, 15, 18, 0)" />
+            </radialGradient>
+            {TERRAIN_TYPES.map((terrain) => {
+              const asset = terrainAssetMap[terrain];
+              return (
+                <pattern
+                  key={terrain}
+                  id={`terrain-${terrain}`}
+                  patternUnits="userSpaceOnUse"
+                  width={HEX_WIDTH}
+                  height={HEX_SIZE * 2}
+                >
+                  <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill="#101311" />
+                  <image
+                    href={asset.image}
+                    x={0}
+                    y={0}
+                    width={HEX_WIDTH}
+                    height={HEX_SIZE * 2}
+                    preserveAspectRatio="xMidYMid slice"
+                  />
+                  <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill={asset.accent} />
+                </pattern>
+              );
+            })}
+          </defs>
 
-          return (
-            <g key={sector.id} className={className} onClick={() => selectSector(sector.id)} role="button" tabIndex={0}>
-              <circle cx={x} cy={y} r={runtime.discovered ? 6.2 : 5.5} />
-              <text x={x} y={y + 0.8} textAnchor="middle">
-                {sector.name
-                  .split(" ")
-                  .map((word) => word[0])
-                  .join("")}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+          <rect width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldGlow)" />
+
+          {worldGeometry.tiles.map((tile) => {
+            const runtime = tile.regionId ? regionRuntimeMap[tile.regionId] : null;
+            const isCity = tile.isCityCore;
+            const discovered = isCity || Boolean(runtime?.discovered);
+            const selected = tile.regionId ? selectedRegionId === tile.regionId : false;
+            const hovered = tile.regionId ? hoveredRegionId === tile.regionId : false;
+            const terrain = terrainAssetMap[tile.terrainType];
+            const stateClass = runtime ? `region-${runtime.state}` : "city-core";
+            const className = [
+              "hex-tile",
+              stateClass,
+              discovered ? "discovered" : "shadowed",
+              selected ? "selected" : "",
+              hovered ? "hovered" : "",
+              isCity ? "city-core" : ""
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            return (
+              <g
+                key={tile.id}
+                className={className}
+                onMouseEnter={() => setHoveredRegionId(tile.regionId)}
+                onMouseLeave={() => setHoveredRegionId(null)}
+                onClick={() => {
+                  if (isCity) {
+                    setView("city");
+                    return;
+                  }
+                  if (tile.regionId) {
+                    selectRegion(tile.regionId);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+              >
+                <polygon className="hex-base" points={tile.points} fill={`url(#terrain-${tile.terrainType})`} />
+                <polygon className="hex-danger" points={tile.points} fill={tile.dangerTint ?? terrain.accent} />
+                <polygon className="hex-stroke" points={tile.points} stroke={terrain.stroke} />
+                {!discovered ? <polygon className="hex-fog" points={tile.points} /> : null}
+                {isCity ? (
+                  <g className="city-reactor-mark">
+                    <circle cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.48} />
+                    <circle cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.27} />
+                    <path d={`M ${tile.center.x - 12} ${tile.center.y + 12} L ${tile.center.x} ${tile.center.y - 14} L ${tile.center.x + 12} ${tile.center.y + 12}`} />
+                    <text x={tile.center.x} y={tile.center.y + 30} textAnchor="middle">City</text>
+                  </g>
+                ) : null}
+              </g>
+            );
+          })}
+
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
+            const labelCenter = regionCenters[region.id];
+            if (!runtime?.discovered || !labelCenter) return null;
+            return (
+              <g key={`${region.id}-label`} className={`region-label ${selectedRegionId === region.id ? "selected" : ""}`}>
+                <text x={labelCenter.x} y={labelCenter.y + HEX_SIZE * 1.22} textAnchor="middle">
+                  {region.name}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+        <div className="world-legend">
+          <div>
+            <span className="legend-dot discovered" />
+            <span>discovered</span>
+          </div>
+          <div>
+            <span className="legend-dot shadowed" />
+            <span>undiscovered outline</span>
+          </div>
+          <div>
+            <span className="legend-dot selected" />
+            <span>selected region</span>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -160,6 +398,7 @@ function CityView() {
             >
               <span>{slot.label}</span>
               <strong>{definition?.name ?? "Empty Slot"}</strong>
+              {building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : null}
             </button>
           );
         })}
@@ -188,25 +427,25 @@ function ViewTabs() {
   );
 }
 
-function SectorActionButtons() {
-  const selectedSectorId = useGameStore((state) => state.selectedSectorId);
-  const sectors = useGameStore((state) => state.sectors);
+function RegionActionButtons() {
+  const selectedRegionId = useGameStore((state) => state.selectedRegionId);
+  const regions = useGameStore((state) => state.regions);
   const launchExpedition = useGameStore((state) => state.launchExpedition);
   const researched = useGameStore((state) => state.researched);
   const resources = useGameStore((state) => state.resources);
 
-  const sectorDefinition = sectorDefinitions.find((sector) => sector.id === selectedSectorId);
-  const sectorRuntime = sectors.find((sector) => sector.id === selectedSectorId);
-  if (!sectorDefinition || !sectorRuntime) return null;
+  const regionDefinition = selectedRegionId ? regionMap[selectedRegionId] : null;
+  const regionRuntime = regions.find((region) => region.id === selectedRegionId);
+  if (!regionDefinition || !regionRuntime) return null;
 
   const canStart = (kind: ExpeditionKind) => {
     const requirement =
       kind === "survey"
-        ? sectorDefinition.access
+        ? regionDefinition.access
         : kind === "exploit"
-          ? sectorDefinition.exploit
+          ? regionDefinition.exploit
           : kind === "secure"
-            ? sectorDefinition.secure
+            ? regionDefinition.secure
             : { tech: ["relay-network"] };
 
     const techOk = (requirement.tech ?? []).every((techId) => researched.includes(techId));
@@ -214,50 +453,47 @@ function SectorActionButtons() {
     return techOk && gearTier >= (requirement.gear ?? 0);
   };
 
+  const actions = [
+    { kind: "survey" as ExpeditionKind, label: "Survey Region", requirement: regionDefinition.access, disabled: regionRuntime.state !== "known" },
+    { kind: "exploit" as ExpeditionKind, label: "Start Exploitation", requirement: regionDefinition.exploit, disabled: regionRuntime.state !== "surveyed" || !canStart("exploit") },
+    { kind: "secure" as ExpeditionKind, label: "Secure Region", requirement: regionDefinition.secure, disabled: regionRuntime.state !== "exploiting" || !canStart("secure") },
+    { kind: "outpost" as ExpeditionKind, label: "Raise Outpost", requirement: { tech: ["relay-network"] }, disabled: regionRuntime.state !== "secured" || !canStart("outpost") }
+  ];
+
   return (
     <div className="action-stack">
-      <button disabled={sectorRuntime.state !== "known"} onClick={() => launchExpedition(sectorDefinition.id, "survey")}>
-        Survey Sector
-      </button>
-      <button
-        disabled={sectorRuntime.state !== "surveyed" || !canStart("exploit")}
-        onClick={() => launchExpedition(sectorDefinition.id, "exploit")}
-      >
-        Start Exploitation
-      </button>
-      <button
-        disabled={sectorRuntime.state !== "exploiting" || !canStart("secure")}
-        onClick={() => launchExpedition(sectorDefinition.id, "secure")}
-      >
-        Secure Sector
-      </button>
-      <button
-        disabled={sectorRuntime.state !== "secured" || !canStart("outpost")}
-        onClick={() => launchExpedition(sectorDefinition.id, "outpost")}
-      >
-        Raise Outpost
-      </button>
+      {actions.map((item) => (
+        <button key={item.kind} disabled={item.disabled} onClick={() => launchExpedition(regionDefinition.id, item.kind)}>
+          <span>{item.label}</span>
+          <small>
+            {item.disabled && item.kind !== "survey"
+              ? getBlockedReason(item.requirement, researched, resources.gear)
+              : getRequirementSummary(item.requirement, researched, resources.gear).join(" / ")}
+          </small>
+        </button>
+      ))}
     </div>
   );
 }
 
 function DetailsPanel() {
   const view = useGameStore((state) => state.view);
-  const selectedSectorId = useGameStore((state) => state.selectedSectorId);
+  const selectedRegionId = useGameStore((state) => state.selectedRegionId);
   const selectedSlotId = useGameStore((state) => state.selectedSlotId);
-  const sectors = useGameStore((state) => state.sectors);
+  const regions = useGameStore((state) => state.regions);
   const buildings = useGameStore((state) => state.buildings);
   const buildInSlot = useGameStore((state) => state.buildInSlot);
+  const toggleBuilding = useGameStore((state) => state.toggleBuilding);
+  const upgradeBuilding = useGameStore((state) => state.upgradeBuilding);
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
   const startResearch = useGameStore((state) => state.startResearch);
   const resources = useGameStore((state) => state.resources);
 
-  const selectedSector = sectorDefinitions.find((sector) => sector.id === selectedSectorId);
-  const selectedSectorState = sectors.find((sector) => sector.id === selectedSectorId);
+  const selectedRegion = selectedRegionId ? regionMap[selectedRegionId] : null;
+  const selectedRegionState = regions.find((region) => region.id === selectedRegionId);
   const selectedSlot = districtSlots.find((slot) => slot.id === selectedSlotId);
   const existingBuilding = buildings.find((item) => item.slotId === selectedSlotId);
-
   const buildOptions = buildingDefinitions.filter((definition) => {
     if (definition.unlockTech && !researched.includes(definition.unlockTech)) return false;
     return !buildings.some((instance) => instance.slotId === selectedSlotId);
@@ -265,34 +501,38 @@ function DetailsPanel() {
 
   return (
     <aside className="detail-panel">
-      {view === "world" && selectedSector && selectedSectorState ? (
+      {view === "world" && selectedRegion && selectedRegionState ? (
         <>
           <div className="panel-header">
             <div>
-              <p className="eyebrow">{selectedSector.archetype}</p>
-              <h2>{selectedSector.name}</h2>
+              <p className="eyebrow">{selectedRegion.archetype}</p>
+              <h2>{selectedRegion.name}</h2>
             </div>
-            <span className={`status-pill ${selectedSectorState.state}`}>{sectorStateLabel[selectedSectorState.state]}</span>
+            <span className={`status-pill ${selectedRegionState.state}`}>{regionStateLabel[selectedRegionState.state]}</span>
           </div>
-          <p className="panel-copy">{selectedSector.description}</p>
+          <p className="panel-copy">{selectedRegion.description}</p>
           <div className="panel-grid">
             <div>
               <span>Ring</span>
-              <strong>{selectedSector.ring}</strong>
+              <strong>{selectedRegion.ring}</strong>
+            </div>
+            <div>
+              <span>Terrain</span>
+              <strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong>
+            </div>
+            <div>
+              <span>Hexes</span>
+              <strong>{selectedRegion.hexTileIds.length}</strong>
             </div>
             <div>
               <span>Hazards</span>
-              <strong>
-                {Object.entries(selectedSector.hazard)
-                  .map(([hazard, score]) => `${hazard} ${score}`)
-                  .join(" / ")}
-              </strong>
+              <strong>{Object.entries(selectedRegion.hazard).map(([hazard, score]) => `${hazard} ${score}`).join(" / ")}</strong>
             </div>
           </div>
           <div className="subsection">
             <h3>Yield</h3>
             <ul className="flat-list">
-              {Object.entries(selectedSector.resources).map(([resourceId, amount]) => (
+              {Object.entries(selectedRegion.resources).map(([resourceId, amount]) => (
                 <li key={resourceId}>
                   {resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId}
                   <strong>+{Number(amount ?? 0)}</strong>
@@ -301,8 +541,16 @@ function DetailsPanel() {
             </ul>
           </div>
           <div className="subsection">
+            <h3>Action Gates</h3>
+            <div className="flow-tags">
+              <span className="flow-tag">Survey: {getRequirementSummary(selectedRegion.access, researched, resources.gear).join(" / ")}</span>
+              <span className="flow-tag">Exploit: {getRequirementSummary(selectedRegion.exploit, researched, resources.gear).join(" / ")}</span>
+              <span className="flow-tag">Secure: {getRequirementSummary(selectedRegion.secure, researched, resources.gear).join(" / ")}</span>
+            </div>
+          </div>
+          <div className="subsection">
             <h3>Actions</h3>
-            <SectorActionButtons />
+            <RegionActionButtons />
           </div>
         </>
       ) : null}
@@ -318,14 +566,43 @@ function DetailsPanel() {
           {existingBuilding ? (
             <>
               <p className="panel-copy">{buildingMap[existingBuilding.buildingId].description}</p>
+              <div className="meta-list">
+                <div className="meta-row"><span>Building</span><strong>{buildingMap[existingBuilding.buildingId].name}</strong></div>
+                <div className="meta-row"><span>Status</span><strong className={`status-tag ${existingBuilding.enabled ? "online" : "offline"}`}>{existingBuilding.enabled ? "Online" : "Standby"}</strong></div>
+                <div className="meta-row"><span>Level</span><strong>L{existingBuilding.level}</strong></div>
+                <div className="meta-row"><span>Staff</span><strong>{Object.entries(buildingMap[existingBuilding.buildingId].staff).map(([role, amount]) => `${amount} ${role}`).join(" / ") || "No assigned staff"}</strong></div>
+              </div>
               <div className="subsection">
-                <h3>Building</h3>
-                <div className="card-emphasis">{buildingMap[existingBuilding.buildingId].name}</div>
+                <h3>Output</h3>
+                <div className="flow-tags">
+                  {formatFlow(buildingMap[existingBuilding.buildingId].output, existingBuilding.level).map((item) => (
+                    <span key={item} className="flow-tag positive">{item}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="subsection">
+                <h3>Upkeep</h3>
+                <div className="flow-tags">
+                  {formatFlow(buildingMap[existingBuilding.buildingId].upkeep, existingBuilding.level, true).map((item) => (
+                    <span key={item} className="flow-tag">{item}</span>
+                  ))}
+                </div>
+              </div>
+              <div className="subsection">
+                <h3>Actions</h3>
+                <div className="inline-actions">
+                  <button onClick={() => toggleBuilding(selectedSlot.id)}>{existingBuilding.enabled ? "Put On Standby" : "Bring Online"}</button>
+                  <button onClick={() => upgradeBuilding(selectedSlot.id)} disabled={existingBuilding.level >= 2}>
+                    {existingBuilding.level >= 2
+                      ? "Max Level"
+                      : `Upgrade (${Object.entries(buildingMap[existingBuilding.buildingId].cost).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${Math.ceil(Number(amount ?? 0) * 0.8 * existingBuilding.level)}`).join(" / ")})`}
+                  </button>
+                </div>
               </div>
             </>
           ) : (
             <>
-              <p className="panel-copy">Build into this district slot to widen your economy and unlock new sector actions.</p>
+              <p className="panel-copy">Build into this district slot to widen your economy and unlock new region actions.</p>
               <div className="subsection">
                 <h3>Build Menu</h3>
                 <div className="build-list">
@@ -362,19 +639,10 @@ function DetailsPanel() {
           <div className="tech-list">
             {researchNodes.map((node) => {
               const unlocked = researched.includes(node.id);
-              const available =
-                !unlocked &&
-                !activeResearch &&
-                node.prerequisites.every((item) => researched.includes(item)) &&
-                resources.research >= node.cost;
+              const available = !unlocked && !activeResearch && node.prerequisites.every((item) => researched.includes(item)) && resources.research >= node.cost;
 
               return (
-                <button
-                  key={node.id}
-                  className={`tech-node ${unlocked ? "done" : available ? "available" : "locked"}`}
-                  onClick={() => startResearch(node.id)}
-                  disabled={!available}
-                >
+                <button key={node.id} className={`tech-node ${unlocked ? "done" : available ? "available" : "locked"}`} onClick={() => startResearch(node.id)} disabled={!available}>
                   <span>{node.branch}</span>
                   <strong>{node.name}</strong>
                   <small>{node.description}</small>
@@ -391,7 +659,6 @@ function DetailsPanel() {
 function ResearchCanvas() {
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
-
   const branches = ["Chemistry", "Protection", "Renewables", "Logistics", "Medicine", "Infrastructure", "Defense", "Scouting"];
 
   return (
@@ -407,10 +674,7 @@ function ResearchCanvas() {
           <div key={branch} className="branch-column">
             <h3>{branch}</h3>
             {researchNodes.filter((node) => node.branch === branch).map((node) => (
-              <article
-                key={node.id}
-                className={`branch-card ${researched.includes(node.id) ? "done" : activeResearch?.nodeId === node.id ? "active" : ""}`}
-              >
+              <article key={node.id} className={`branch-card ${researched.includes(node.id) ? "done" : activeResearch?.nodeId === node.id ? "active" : ""}`}>
                 <span>Tier {node.tier}</span>
                 <strong>{node.name}</strong>
                 <small>{node.description}</small>
@@ -444,27 +708,19 @@ function BottomBar() {
         ))}
         <button onClick={() => advanceTime(10000)}>Advance +10s</button>
         <button onClick={saveGame}>Save</button>
-        <button className="danger-lite" onClick={resetGame}>
-          Reset
-        </button>
+        <button className="danger-lite" onClick={resetGame}>Reset</button>
       </div>
       <div className="status-block">
         <span>Elapsed</span>
-        <strong>
-          {Math.floor(elapsedSeconds / 60)}m {String(elapsedSeconds % 60).padStart(2, "0")}s
-        </strong>
+        <strong>{Math.floor(elapsedSeconds / 60)}m {String(Math.floor(elapsedSeconds % 60)).padStart(2, "0")}s</strong>
       </div>
       <div className="status-block wide">
         <span>Event</span>
-        <strong>{activeEvent ? `${activeEvent.title} (${activeEvent.remaining}s)` : "No active threat"}</strong>
+        <strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : "No active threat"}</strong>
       </div>
       <div className="status-block wide">
         <span>Expeditions</span>
-        <strong>
-          {expeditions.length > 0
-            ? expeditions.map((item) => `${item.kind}:${item.remaining}s`).join(" | ")
-            : "No missions underway"}
-        </strong>
+        <strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong>
       </div>
       <div className="status-block wide">
         <span>Log</span>
@@ -480,24 +736,35 @@ function AlertStack() {
   return (
     <div className="alert-stack">
       {alerts.map((alert) => (
-        <div key={alert.id} className={`alert-card ${alert.tone}`}>
-          {alert.text}
-        </div>
+        <div key={alert.id} className={`alert-card ${alert.tone}`}>{alert.text}</div>
       ))}
     </div>
   );
 }
 
-function TutorialPanel() {
+function OperationsPanel() {
+  const buildings = useGameStore((state) => state.buildings);
+  const expeditions = useGameStore((state) => state.expeditions);
+  const population = useGameStore((state) => state.population);
+  const freeRoles = getFreeRoles(buildings, expeditions, population.roles);
+
   return (
     <section className="tutorial-panel">
       <p className="eyebrow">Directive</p>
-      <h2>First Shift Checklist</h2>
+      <h2>Operations Board</h2>
+      <div className="mini-grid">
+        {Object.entries(freeRoles).map(([role, amount]) => (
+          <div key={role} className="mini-panel">
+            <span>{role}</span>
+            <strong>{amount}</strong>
+          </div>
+        ))}
+      </div>
       <ol className="flat-list ordered">
-        <li>Survey nearby sectors and claim quick salvage.</li>
-        <li>Research Filter Masks or Renewable Grid depending on your shortage.</li>
-        <li>Build into empty city slots when staff and materials allow it.</li>
-        <li>Exploit then secure sectors to push passive income higher.</li>
+        <li>Survey nearby regions and anchor the first resource wedges around the city core.</li>
+        <li>Use standby mode when staff gets tight or you need to stabilize energy.</li>
+        <li>Upgrade your strongest buildings before overbuilding empty slots.</li>
+        <li>Push research into masks, pesticides, and relay control for outer hex access.</li>
         <li>Watch contamination, water, and food before chasing deep expansion.</li>
       </ol>
     </section>
@@ -529,7 +796,7 @@ export function App() {
           <AlertStack />
         </div>
         <div className="right-column">
-          <TutorialPanel />
+          <OperationsPanel />
           <DetailsPanel />
         </div>
       </main>
@@ -537,4 +804,3 @@ export function App() {
     </div>
   );
 }
-

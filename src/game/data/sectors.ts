@@ -1,124 +1,141 @@
-import type { SectorDefinition } from "../types";
+import { regionHexMap } from "./worldHexes";
+import type { RegionDefinition } from "../types";
 
-export const sectorDefinitions: SectorDefinition[] = [
+export const regionDefinitions: RegionDefinition[] = [
   {
     id: "toxic-forest",
     name: "Toxic Forest",
     archetype: "Toxic Forest",
     ring: 1,
-    angle: 0,
-    description: "Dense mutant flora, light spores, steady biomass flow.",
+    primaryTerrain: "toxic-forest",
+    secondaryTerrains: ["neutral-rock"],
+    description: "Dense mutant flora, light spores, and biomass veins crowd the upland canopy.",
     hazard: { toxicity: 1, spores: 2 },
     resources: { biomass: 2, research: 1 },
     surveyReward: { research: 5 },
     secureReward: { biomass: 10 },
     access: {},
     exploit: { tech: ["filter-masks"], gear: 1 },
-    secure: { tech: ["basic-pesticides"], gear: 1 }
+    secure: { tech: ["basic-pesticides"], gear: 1 },
+    hexTileIds: regionHexMap["toxic-forest"]
   },
   {
     id: "scavenger-run",
     name: "Scavenger Run",
     archetype: "Scavenger Sector",
     ring: 1,
-    angle: 45,
-    description: "Collapsed service blocks with salvage and low threat pressure.",
+    primaryTerrain: "scavenger-scrapland",
+    secondaryTerrains: ["neutral-rock"],
+    description: "Collapsed service blocks and broken transit lanes hide salvage under mild threat pressure.",
     hazard: { infestation: 1 },
     resources: { materials: 2, research: 1 },
     surveyReward: { materials: 8 },
     secureReward: { materials: 6 },
     access: {},
     exploit: {},
-    secure: { tech: ["relay-network"] }
+    secure: { tech: ["relay-network"] },
+    hexTileIds: regionHexMap["scavenger-run"]
   },
   {
     id: "fungal-wetlands",
     name: "Fungal Wetlands",
     archetype: "Fungal Wetlands",
     ring: 1,
-    angle: 90,
-    description: "Shallow basins rich in water and volatile fungal mats.",
+    primaryTerrain: "fungal-wetlands",
+    secondaryTerrains: ["toxic-forest", "neutral-rock"],
+    description: "Shallow basins rich in water and unstable fungal mats spread across the low ground.",
     hazard: { spores: 2, toxicity: 1 },
     resources: { water: 2, biomass: 1 },
     surveyReward: { research: 4, water: 4 },
     secureReward: { water: 8 },
     access: {},
     exploit: { tech: ["filter-masks"], gear: 1 },
-    secure: { tech: ["field-clinic"] }
+    secure: { tech: ["field-clinic"] },
+    hexTileIds: regionHexMap["fungal-wetlands"]
   },
   {
     id: "overgrown-ruins",
     name: "Overgrown Ruins",
     archetype: "Overgrown Ruins",
     ring: 1,
-    angle: 135,
-    description: "Steel skeletons buried in roots and insect nests.",
+    primaryTerrain: "overgrown-ruins",
+    secondaryTerrains: ["neutral-rock"],
+    description: "Steel skeletons are buried in roots, scaffold wreckage, and small insect burrows.",
     hazard: { spores: 1, infestation: 2 },
     resources: { materials: 2, biomass: 1 },
     surveyReward: { materials: 6, research: 4 },
     secureReward: { materials: 8 },
     access: {},
     exploit: { tech: ["filter-masks"], gear: 1 },
-    secure: { tech: ["basic-pesticides"] }
+    secure: { tech: ["basic-pesticides"] },
+    hexTileIds: regionHexMap["overgrown-ruins"]
   },
   {
     id: "waste-basin",
     name: "Waste Basin",
     archetype: "Chemical Waste Basin",
     ring: 2,
-    angle: 180,
-    description: "Acidic pools and ruined tanks full of chemical precursor sludge.",
+    primaryTerrain: "chemical-waste",
+    secondaryTerrains: ["neutral-rock"],
+    description: "Acidic pools and ruined storage tanks simmer with precursor sludge and solvent runoff.",
     hazard: { toxicity: 3, radiation: 1 },
     resources: { feedstock: 3, pesticides: 1 },
     surveyReward: { feedstock: 8 },
     secureReward: { pesticides: 6 },
     access: { tech: ["filter-masks"] },
     exploit: { tech: ["basic-pesticides", "sealed-suits"], gear: 2 },
-    secure: { tech: ["sealed-suits", "relay-network"], gear: 2 }
+    secure: { tech: ["sealed-suits", "relay-network"], gear: 2 },
+    hexTileIds: regionHexMap["waste-basin"]
   },
   {
     id: "mutant-nest",
     name: "Mutant Nest",
     archetype: "Mutant Nest Zone",
     ring: 2,
-    angle: 225,
-    description: "A breeding pit feeding periodic swarms toward the city.",
+    primaryTerrain: "mutant-nest",
+    secondaryTerrains: ["chemical-waste"],
+    description: "A breeding trench radiates heat and swarm pressure toward any unsecured route.",
     hazard: { infestation: 3, toxicity: 1 },
     resources: { biomass: 2, pesticides: 1 },
     surveyReward: { research: 8 },
     secureReward: { pesticides: 6 },
     access: { tech: ["filter-masks"] },
     exploit: { tech: ["basic-pesticides", "spray-towers"], gear: 1 },
-    secure: { tech: ["spray-towers", "sealed-suits"], gear: 2 }
+    secure: { tech: ["spray-towers", "sealed-suits"], gear: 2 },
+    hexTileIds: regionHexMap["mutant-nest"]
   },
   {
     id: "irradiated-fields",
     name: "Irradiated Fields",
     archetype: "Irradiated Fields",
     ring: 2,
-    angle: 270,
-    description: "Ash plains threaded with glowing dust and rare catalyst deposits.",
+    primaryTerrain: "irradiated-badlands",
+    secondaryTerrains: ["neutral-rock"],
+    description: "Ash plains threaded with glowing dust and brittle catalyst seams.",
     hazard: { radiation: 3, toxicity: 2 },
     resources: { research: 2, materials: 1 },
     surveyReward: { research: 10 },
     secureReward: { materials: 10 },
     access: { tech: ["sealed-suits"] },
     exploit: { tech: ["sealed-suits", "relay-network"], gear: 2 },
-    secure: { tech: ["sealed-suits", "detox-protocols"], gear: 2 }
+    secure: { tech: ["sealed-suits", "detox-protocols"], gear: 2 },
+    hexTileIds: regionHexMap["irradiated-fields"]
   },
   {
     id: "industrial-hulk",
     name: "Industrial Hulk",
     archetype: "Abandoned Industrial Zone",
     ring: 2,
-    angle: 315,
-    description: "A dead logistics complex with heavy salvage and corrosive hazards.",
+    primaryTerrain: "industrial-hulk",
+    secondaryTerrains: ["neutral-rock"],
+    description: "A dead logistics complex of broken gantries, depot decks, and corrosive salvage pockets.",
     hazard: { toxicity: 2, infestation: 2 },
     resources: { materials: 3, feedstock: 1 },
     surveyReward: { materials: 10 },
     secureReward: { feedstock: 6 },
     access: { tech: ["filter-masks"] },
     exploit: { tech: ["basic-pesticides", "relay-network"], gear: 1 },
-    secure: { tech: ["sealed-suits", "spray-towers"], gear: 2 }
+    secure: { tech: ["sealed-suits", "spray-towers"], gear: 2 },
+    hexTileIds: regionHexMap["industrial-hulk"]
   }
 ];

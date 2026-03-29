@@ -11,3 +11,11 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Tuned the early economy by slowing per-second rates, removing barracks food drain, and versioning the save key to reset stale local saves.
 - Added public/favicon.svg and linked it in index.html to remove the missing-favicon console error.
 - Remaining expansion TODOs: richer city interactions (staff reassignment, building upgrades), additional sector actions, stronger event variety, and a dedicated renderer layer if we move beyond the management-first prototype.
+- Replaced the old ring/node world map with a real authored hex board centered on the city core.
+- Split world logic into region-level gameplay data plus static hex-tile layout data in src/game/data/worldHexes.ts.
+- Migrated store/runtime state from sectors to regions, updated expeditions, save schema, renderToText, and detail panels to use region IDs.
+- Added terrain-aware world rendering with grouped region selection, undiscovered outer silhouettes, and a city-core hex that routes back into the city view.
+- Generated first-pass AI biome tiles into public/world-hex/tiles for city-core, toxic-forest, fungal-wetlands, overgrown-ruins, scavenger-scrapland, chemical-waste, irradiated-badlands, industrial-hulk, mutant-nest, and neutral-rock.
+- Browser QA found region labels intercepting clicks; fixed by disabling pointer events on labels and reactor mark overlays.
+- Latest checks: npm test, npm run build, generated biome asset review, browser snapshots for initial world view, region selection, and city entry all passed.
+- Next suggested step: deepen city-building progression now that the world map and terrain layer are stable, or add second-pass tile variants per biome to reduce repetition.
