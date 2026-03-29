@@ -816,3 +816,67 @@ button {
 .city-reactor-mark {
   pointer-events: none;
 }
+
+.expanded-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.expanded-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.summary-wide {
+  grid-column: 1 / -1;
+}
+
+.wide-board {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.flow-tag.doctrine {
+  border-color: rgba(141, 189, 227, 0.25);
+}
+
+.flow-tag.warning {
+  border-color: rgba(223, 117, 101, 0.28);
+}
+
+.wide-panel {
+  margin-bottom: 0.7rem;
+}
+
+@media (max-width: 1200px) {
+  .expanded-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .expanded-summary,
+  .wide-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .expanded-grid,
+  .expanded-summary,
+  .wide-board {
+    grid-template-columns: 1fr;
+  }
+}
+.doctrine-list {
+  gap: 0.75rem;
+}
+
+.doctrine-option {
+  border-color: rgba(120, 205, 167, 0.24);
+}
+
+.doctrine-card {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.doctrine-card strong {
+  color: #f4e5bc;
+}

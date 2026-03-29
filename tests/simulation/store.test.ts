@@ -24,16 +24,18 @@ describe("Pestizide Punk store", () => {
     expect(region?.state).toBe("surveyed");
   });
 
-  it("can toggle and upgrade a city building", () => {
+  it("can toggle, upgrade, and specialize a city building", () => {
     const state = useGameStore.getState();
     const beforeMaterials = state.resources.materials;
     state.toggleBuilding("west");
     expect(useGameStore.getState().buildings.find((item) => item.slotId === "west")?.enabled).toBe(false);
     state.toggleBuilding("west");
     state.upgradeBuilding("west");
+    state.chooseBuildingUpgrade("west", "throughput-smelter");
     const upgraded = useGameStore.getState().buildings.find((item) => item.slotId === "west");
     expect(upgraded?.enabled).toBe(true);
     expect(upgraded?.level).toBe(2);
+    expect(upgraded?.upgradeOptionId).toBe("throughput-smelter");
     expect(useGameStore.getState().resources.materials).toBeLessThan(beforeMaterials);
   });
 
@@ -41,5 +43,22 @@ describe("Pestizide Punk store", () => {
     const regionTiles = worldHexes.filter((tile) => !tile.isCityCore);
     expect(regionTiles.every((tile) => tile.regionId)).toBe(true);
     expect(worldHexes.some((tile) => tile.isCityCore)).toBe(true);
+  });
+
+  it("tracks pollution and protection layers", () => {
+    const state = useGameStore.getState();
+    expect(state.pollution).toBeGreaterThan(0);
+    expect(state.population.protection.respiratory).toBeGreaterThanOrEqual(0);
+    state.advanceTime(10000);
+    expect(useGameStore.getState().pollution).toBeGreaterThanOrEqual(0);
+  });
+
+  it("lets radical doctrine upgrades push pollution upward", () => {
+    const state = useGameStore.getState();
+    state.upgradeBuilding("west");
+    state.chooseBuildingUpgrade("west", "throughput-smelter");
+    const beforePollution = useGameStore.getState().pollution;
+    state.advanceTime(10000);
+    expect(useGameStore.getState().pollution).toBeGreaterThan(beforePollution);
   });
 });

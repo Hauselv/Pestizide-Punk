@@ -19,3 +19,20 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Browser QA found region labels intercepting clicks; fixed by disabling pointer events on labels and reactor mark overlays.
 - Latest checks: npm test, npm run build, generated biome asset review, browser snapshots for initial world view, region selection, and city entry all passed.
 - Next suggested step: deepen city-building progression now that the world map and terrain layer are stable, or add second-pass tile variants per biome to reduce repetition.
+- Began the Industrial Systems Pass on top of the committed hex-world milestone (`Add hex world frontier milestone`).
+- Expanded the resource model from a flat energy economy to power plus fuel/material families: power, coal, oil, glass, fertilizer, and a global pollution pressure value.
+- Added protection-slot typing and runtime support for respiratory, chemical, radiation, and environmental coverage.
+- Reworked building definitions around doctrine tradeoffs, including cleaner and dirtier production paths plus new food, pest-control, and protection buildings.
+- Rebuilt the research tree to expose opposing doctrine choices directly in the UI, including clean vs fossil energy, bio vs synthetic agriculture, and bio-control vs radical fumigation.
+- Updated region requirements to gate actions on protection profiles as well as tech and gear, keeping region progression readable but more systemic.
+- Reworked the store simulation to derive protection from research and buildings, accumulate pollution from dirty systems, and surface pollution/protection in alerts and render-to-text output.
+- Refreshed the main UI to show the expanded resource HUD, pollution, protection spread, doctrine tags, building emissions/storage/protection, and protection-aware region action gates.
+- Latest verification after the industrial pass: `npm test`, `npm run build`, browser QA on world, city, and research views, and console check all passed with no new errors.
+- Suggested next step: deepen building progression with staffing pressure, upgrades that branch by doctrine, and more explicit storage/load balancing between clean power, dirty fuel, and food chains.
+- Added doctrine-based building specialization on top of level upgrades, so selected buildings now branch into cleaner or harsher industrial paths after reaching L2.
+- New upgrade-path data lives in src/game/data/buildings.ts and covers early energy, production, food, research, and protection buildings.
+- Building instances now persist an optional upgradeOptionId, and the sim merges doctrine modifiers into output, upkeep, protection, storage, mitigation, emissions, and pollution calculations.
+- City detail UI now exposes the active doctrine, merged tradeoffs, and choice cards when a building reaches L2 without a locked specialization.
+- Added simulation coverage for doctrine specialization plus a pollution regression check in tests/simulation/store.test.ts.
+- Latest checks for this pass: npm test, npm run build, and a headless browser QA screenshot for the Cargo Spine scrap foundry doctrine flow in output/web-game/doctrine-city/shot-0.png.
+- Next suggested step: make doctrine choices affect staffing and event interactions, or add building families with mutually exclusive tier-3 follow-ups instead of only one post-upgrade lock-in.

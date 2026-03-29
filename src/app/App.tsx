@@ -13,6 +13,7 @@ import type {
   ExpeditionKind,
   HexCoord,
   HexTileDefinition,
+  ProtectionSlotId,
   RegionStateId,
   ResourceFlow,
   ResourceId,
@@ -22,13 +23,8 @@ import type {
   ViewMode
 } from "../game/types";
 
-const buildingMap = Object.fromEntries(
-  buildingDefinitions.map((definition) => [definition.id, definition])
-) as Record<string, BuildingDefinition>;
-
-const regionMap = Object.fromEntries(
-  regionDefinitions.map((definition) => [definition.id, definition])
-);
+const buildingMap = Object.fromEntries(buildingDefinitions.map((definition) => [definition.id, definition])) as Record<string, BuildingDefinition>;
+const regionMap = Object.fromEntries(regionDefinitions.map((definition) => [definition.id, definition]));
 
 const regionStateLabel: Record<RegionStateId, string> = {
   known: "Known",
@@ -53,6 +49,43 @@ function buildingMultiplier(level: number) {
   return 1 + (level - 1) * 0.5;
 }
 
+function mergeResourceFlow(base?: ResourceFlow, extra?: ResourceFlow) {
+  const merged: ResourceFlow = { ...(base ?? {}) };
+  Object.entries(extra ?? {}).forEach(([resourceId, amount]) => {
+    merged[resourceId as ResourceId] = Number(merged[resourceId as ResourceId] ?? 0) + Number(amount ?? 0);
+  });
+  return merged;
+}
+
+function mergeProtectionFlow(base?: Partial<Record<ProtectionSlotId, number>>, extra?: Partial<Record<ProtectionSlotId, number>>) {
+  const merged: Partial<Record<ProtectionSlotId, number>> = { ...(base ?? {}) };
+  Object.entries(extra ?? {}).forEach(([slotId, amount]) => {
+    merged[slotId as ProtectionSlotId] = Number(merged[slotId as ProtectionSlotId] ?? 0) + Number(amount ?? 0);
+  });
+  return merged;
+}
+
+function getSelectedUpgrade(definition: BuildingDefinition, instance: BuildingInstance) {
+  if (!instance.upgradeOptionId) return null;
+  return definition.upgradeOptions?.find((option) => option.id === instance.upgradeOptionId) ?? null;
+}
+
+function getEffectiveBuildingData(definition: BuildingDefinition, instance: BuildingInstance) {
+  const selectedUpgrade = getSelectedUpgrade(definition, instance);
+  return {
+    output: mergeResourceFlow(definition.output, selectedUpgrade?.output),
+    upkeep: mergeResourceFlow(definition.upkeep, selectedUpgrade?.upkeep),
+    storageCapacity: mergeResourceFlow(definition.storageCapacity, selectedUpgrade?.storageCapacity),
+    protectionOutput: mergeProtectionFlow(definition.protectionOutput, selectedUpgrade?.protectionOutput),
+    emissions: Number(definition.emissions ?? 0) + Number(selectedUpgrade?.emissions ?? 0),
+    wasteOutput: {
+      pollution: Number(definition.wasteOutput?.pollution ?? 0) + Number(selectedUpgrade?.wasteOutput?.pollution ?? 0)
+    },
+    doctrineTags: [...new Set([...(definition.doctrineTags ?? []), ...(selectedUpgrade?.doctrineTags ?? [])])],
+    selectedUpgrade
+  };
+}
+
 function formatFlow(flow?: ResourceFlow, level = 1, asCost = false) {
   if (!flow || Object.keys(flow).length === 0) return ["None"];
   return Object.entries(flow).map(([resourceId, amount]) => {
@@ -64,13 +97,14 @@ function formatFlow(flow?: ResourceFlow, level = 1, asCost = false) {
   });
 }
 
+function formatProtection(protection: Record<ProtectionSlotId, number>) {
+  return Object.entries(protection)
+    .map(([slot, value]) => `${slot} ${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}`)
+    .join(" / ");
+}
+
 function getFreeRoles(buildings: BuildingInstance[], expeditions: Expedition[], roles: Record<RoleId, number>) {
-  const used: Record<RoleId, number> = {
-    workers: 0,
-    technicians: 0,
-    researchers: 0,
-    rangers: 0
-  };
+  const used: Record<RoleId, number> = { workers: 0, technicians: 0, researchers: 0, rangers: 0 };
 
   buildings.forEach((building) => {
     if (!building.enabled) return;
@@ -94,25 +128,28 @@ function getFreeRoles(buildings: BuildingInstance[], expeditions: Expedition[], 
   };
 }
 
-function getRequirementSummary(requirement: SectorActionRequirement, researched: string[], gear: number) {
+function getRequirementSummary(requirement: SectorActionRequirement, researched: string[], gear: number, protection: Record<ProtectionSlotId, number>) {
   const parts: string[] = [];
-  const gearTier = gear >= 10 ? 2 : gear >= 4 ? 1 : 0;
+  const gearTier = gear >= 12 ? 3 : gear >= 6 ? 2 : gear >= 3 ? 1 : 0;
   if ((requirement.tech ?? []).length > 0) {
-    parts.push(
-      ...(requirement.tech ?? []).map((techId) => {
-        const name = researchNodes.find((node) => node.id === techId)?.name ?? techId;
-        return `${researched.includes(techId) ? "Ready" : "Missing"}: ${name}`;
-      })
-    );
+    parts.push(...(requirement.tech ?? []).map((techId) => {
+      const name = researchNodes.find((node) => node.id === techId)?.name ?? techId;
+      return `${researched.includes(techId) ? "Ready" : "Missing"}: ${name}`;
+    }));
   }
   if (requirement.gear) {
     parts.push(`${gearTier >= requirement.gear ? "Ready" : "Missing"}: Gear tier ${requirement.gear}`);
   }
+  if (requirement.protection) {
+    Object.entries(requirement.protection).forEach(([slot, amount]) => {
+      parts.push(`${protection[slot as ProtectionSlotId] >= Number(amount ?? 0) ? "Ready" : "Missing"}: ${slot} ${amount}`);
+    });
+  }
   return parts.length > 0 ? parts : ["No extra requirements"];
 }
 
-function getBlockedReason(requirement: SectorActionRequirement, researched: string[], gear: number) {
-  const missing = getRequirementSummary(requirement, researched, gear).filter((item) => item.startsWith("Missing"));
+function getBlockedReason(requirement: SectorActionRequirement, researched: string[], gear: number, protection: Record<ProtectionSlotId, number>) {
+  const missing = getRequirementSummary(requirement, researched, gear, protection).filter((item) => item.startsWith("Missing"));
   return missing.length > 0 ? missing.join(" / ") : "Requirements met";
 }
 
@@ -166,10 +203,7 @@ const tileMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [tile.id, t
 const regionCenters = Object.fromEntries(
   regionDefinitions.map((region) => {
     const regionTiles = region.hexTileIds.map((tileId) => tileMap[tileId]).filter(Boolean);
-    const center = regionTiles.reduce(
-      (acc, tile) => ({ x: acc.x + tile.center.x, y: acc.y + tile.center.y }),
-      { x: 0, y: 0 }
-    );
+    const center = regionTiles.reduce((acc, tile) => ({ x: acc.x + tile.center.x, y: acc.y + tile.center.y }), { x: 0, y: 0 });
     const divisor = Math.max(1, regionTiles.length);
     return [region.id, { x: center.x / divisor, y: center.y / divisor }];
   })
@@ -177,6 +211,7 @@ const regionCenters = Object.fromEntries(
 
 function ResourceHud() {
   const resources = useGameStore((state) => state.resources);
+  const pollution = useGameStore((state) => state.pollution);
   const population = useGameStore((state) => state.population);
 
   return (
@@ -185,7 +220,7 @@ function ResourceHud() {
         <p className="eyebrow">Pestizide Punk</p>
         <h1>Reactor City Authority</h1>
       </div>
-      <div className="resource-grid">
+      <div className="resource-grid expanded-grid">
         {resourceDefinitions.map((resource) => (
           <div className="resource-chip" key={resource.id}>
             <span className="resource-dot" style={{ background: resource.color }} />
@@ -194,19 +229,12 @@ function ResourceHud() {
           </div>
         ))}
       </div>
-      <div className="population-summary">
-        <div>
-          <span>Health</span>
-          <strong>{population.health.toFixed(0)}%</strong>
-        </div>
-        <div>
-          <span>Contamination</span>
-          <strong>{population.contamination.toFixed(0)}%</strong>
-        </div>
-        <div>
-          <span>Stability</span>
-          <strong>{population.stability.toFixed(0)}%</strong>
-        </div>
+      <div className="population-summary expanded-summary">
+        <div><span>Health</span><strong>{population.health.toFixed(0)}%</strong></div>
+        <div><span>Contamination</span><strong>{population.contamination.toFixed(0)}%</strong></div>
+        <div><span>Stability</span><strong>{population.stability.toFixed(0)}%</strong></div>
+        <div><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
+        <div className="summary-wide"><span>Protection</span><strong>{formatProtection(population.protection)}</strong></div>
       </div>
     </header>
   );
@@ -219,11 +247,7 @@ function WorldMap() {
   const setView = useGameStore((state) => state.setView);
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
 
-  const regionRuntimeMap = useMemo(
-    () => Object.fromEntries(regions.map((region) => [region.id, region])),
-    [regions]
-  );
-
+  const regionRuntimeMap = useMemo(() => Object.fromEntries(regions.map((region) => [region.id, region])), [regions]);
   const discoveredRegions = regions.filter((region) => region.discovered).length;
 
   return (
@@ -235,18 +259,11 @@ function WorldMap() {
         </div>
         <div className="world-toolbar">
           <span className="status-pill ghost">{discoveredRegions}/{regions.length} regions charted</span>
-          <button className="ghost-button" onClick={() => setView("city")}>
-            Enter City
-          </button>
+          <button className="ghost-button" onClick={() => setView("city")}>Enter City</button>
         </div>
       </div>
       <div className="world-frame">
-        <svg
-          className="world-svg"
-          viewBox={`0 0 ${worldGeometry.width} ${worldGeometry.height}`}
-          role="img"
-          aria-label="Hex world overview map"
-        >
+        <svg className="world-svg" viewBox={`0 0 ${worldGeometry.width} ${worldGeometry.height}`} role="img" aria-label="Hex world overview map">
           <defs>
             <radialGradient id="worldGlow" cx="50%" cy="44%" r="65%">
               <stop offset="0%" stopColor="rgba(255, 192, 96, 0.26)" />
@@ -255,30 +272,15 @@ function WorldMap() {
             {TERRAIN_TYPES.map((terrain) => {
               const asset = terrainAssetMap[terrain];
               return (
-                <pattern
-                  key={terrain}
-                  id={`terrain-${terrain}`}
-                  patternUnits="userSpaceOnUse"
-                  width={HEX_WIDTH}
-                  height={HEX_SIZE * 2}
-                >
+                <pattern key={terrain} id={`terrain-${terrain}`} patternUnits="userSpaceOnUse" width={HEX_WIDTH} height={HEX_SIZE * 2}>
                   <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill="#101311" />
-                  <image
-                    href={asset.image}
-                    x={0}
-                    y={0}
-                    width={HEX_WIDTH}
-                    height={HEX_SIZE * 2}
-                    preserveAspectRatio="xMidYMid slice"
-                  />
+                  <image href={asset.image} x={0} y={0} width={HEX_WIDTH} height={HEX_SIZE * 2} preserveAspectRatio="xMidYMid slice" />
                   <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill={asset.accent} />
                 </pattern>
               );
             })}
           </defs>
-
           <rect width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldGlow)" />
-
           {worldGeometry.tiles.map((tile) => {
             const runtime = tile.regionId ? regionRuntimeMap[tile.regionId] : null;
             const isCity = tile.isCityCore;
@@ -287,35 +289,15 @@ function WorldMap() {
             const hovered = tile.regionId ? hoveredRegionId === tile.regionId : false;
             const terrain = terrainAssetMap[tile.terrainType];
             const stateClass = runtime ? `region-${runtime.state}` : "city-core";
-            const className = [
-              "hex-tile",
-              stateClass,
-              discovered ? "discovered" : "shadowed",
-              selected ? "selected" : "",
-              hovered ? "hovered" : "",
-              isCity ? "city-core" : ""
-            ]
-              .filter(Boolean)
-              .join(" ");
-
+            const className = ["hex-tile", stateClass, discovered ? "discovered" : "shadowed", selected ? "selected" : "", hovered ? "hovered" : "", isCity ? "city-core" : ""].filter(Boolean).join(" ");
             return (
-              <g
-                key={tile.id}
-                className={className}
-                onMouseEnter={() => setHoveredRegionId(tile.regionId)}
-                onMouseLeave={() => setHoveredRegionId(null)}
-                onClick={() => {
-                  if (isCity) {
-                    setView("city");
-                    return;
-                  }
-                  if (tile.regionId) {
-                    selectRegion(tile.regionId);
-                  }
-                }}
-                role="button"
-                tabIndex={0}
-              >
+              <g key={tile.id} className={className} onMouseEnter={() => setHoveredRegionId(tile.regionId)} onMouseLeave={() => setHoveredRegionId(null)} onClick={() => {
+                if (isCity) {
+                  setView("city");
+                  return;
+                }
+                if (tile.regionId) selectRegion(tile.regionId);
+              }} role="button" tabIndex={0}>
                 <polygon className="hex-base" points={tile.points} fill={`url(#terrain-${tile.terrainType})`} />
                 <polygon className="hex-danger" points={tile.points} fill={tile.dangerTint ?? terrain.accent} />
                 <polygon className="hex-stroke" points={tile.points} stroke={terrain.stroke} />
@@ -331,33 +313,21 @@ function WorldMap() {
               </g>
             );
           })}
-
           {regionDefinitions.map((region) => {
             const runtime = regionRuntimeMap[region.id];
             const labelCenter = regionCenters[region.id];
             if (!runtime?.discovered || !labelCenter) return null;
             return (
               <g key={`${region.id}-label`} className={`region-label ${selectedRegionId === region.id ? "selected" : ""}`}>
-                <text x={labelCenter.x} y={labelCenter.y + HEX_SIZE * 1.22} textAnchor="middle">
-                  {region.name}
-                </text>
+                <text x={labelCenter.x} y={labelCenter.y + HEX_SIZE * 1.22} textAnchor="middle">{region.name}</text>
               </g>
             );
           })}
         </svg>
         <div className="world-legend">
-          <div>
-            <span className="legend-dot discovered" />
-            <span>discovered</span>
-          </div>
-          <div>
-            <span className="legend-dot shadowed" />
-            <span>undiscovered outline</span>
-          </div>
-          <div>
-            <span className="legend-dot selected" />
-            <span>selected region</span>
-          </div>
+          <div><span className="legend-dot discovered" /><span>discovered</span></div>
+          <div><span className="legend-dot shadowed" /><span>undiscovered outline</span></div>
+          <div><span className="legend-dot selected" /><span>selected region</span></div>
         </div>
       </div>
     </section>
@@ -377,25 +347,15 @@ function CityView() {
           <p className="eyebrow">City View</p>
           <h2>Reactor District Slots</h2>
         </div>
-        <button className="ghost-button" onClick={() => setView("world")}>
-          Back To World
-        </button>
+        <button className="ghost-button" onClick={() => setView("world")}>Back To World</button>
       </div>
       <div className="city-plate">
-        <div className="reactor-core">
-          <span>REACTOR</span>
-          <strong>Core</strong>
-        </div>
+        <div className="reactor-core"><span>REACTOR</span><strong>Core</strong></div>
         {districtSlots.map((slot) => {
           const building = buildings.find((item) => item.slotId === slot.id);
           const definition = building ? buildingMap[building.buildingId] : null;
           return (
-            <button
-              key={slot.id}
-              className={`district-slot ${selectedSlotId === slot.id ? "selected" : ""} ${building ? "occupied" : "empty"}`}
-              style={{ left: `${slot.x}%`, top: `${slot.y}%` }}
-              onClick={() => selectSlot(slot.id)}
-            >
+            <button key={slot.id} className={`district-slot ${selectedSlotId === slot.id ? "selected" : ""} ${building ? "occupied" : "empty"}`} style={{ left: `${slot.x}%`, top: `${slot.y}%` }} onClick={() => selectSlot(slot.id)}>
               <span>{slot.label}</span>
               <strong>{definition?.name ?? "Empty Slot"}</strong>
               {building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : null}
@@ -410,18 +370,12 @@ function CityView() {
 function ViewTabs() {
   const view = useGameStore((state) => state.view);
   const setView = useGameStore((state) => state.setView);
-  const tabs: { id: ViewMode; label: string }[] = [
-    { id: "world", label: "World" },
-    { id: "city", label: "City" },
-    { id: "research", label: "Research" }
-  ];
+  const tabs: { id: ViewMode; label: string }[] = [{ id: "world", label: "World" }, { id: "city", label: "City" }, { id: "research", label: "Research" }];
 
   return (
     <nav className="view-tabs">
       {tabs.map((tab) => (
-        <button key={tab.id} className={view === tab.id ? "active" : ""} onClick={() => setView(tab.id)}>
-          {tab.label}
-        </button>
+        <button key={tab.id} className={view === tab.id ? "active" : ""} onClick={() => setView(tab.id)}>{tab.label}</button>
       ))}
     </nav>
   );
@@ -433,24 +387,18 @@ function RegionActionButtons() {
   const launchExpedition = useGameStore((state) => state.launchExpedition);
   const researched = useGameStore((state) => state.researched);
   const resources = useGameStore((state) => state.resources);
+  const protection = useGameStore((state) => state.population.protection);
 
   const regionDefinition = selectedRegionId ? regionMap[selectedRegionId] : null;
   const regionRuntime = regions.find((region) => region.id === selectedRegionId);
   if (!regionDefinition || !regionRuntime) return null;
 
   const canStart = (kind: ExpeditionKind) => {
-    const requirement =
-      kind === "survey"
-        ? regionDefinition.access
-        : kind === "exploit"
-          ? regionDefinition.exploit
-          : kind === "secure"
-            ? regionDefinition.secure
-            : { tech: ["relay-network"] };
-
+    const requirement = kind === "survey" ? regionDefinition.access : kind === "exploit" ? regionDefinition.exploit : kind === "secure" ? regionDefinition.secure : { tech: ["relay-network"] };
     const techOk = (requirement.tech ?? []).every((techId) => researched.includes(techId));
-    const gearTier = resources.gear >= 10 ? 2 : resources.gear >= 4 ? 1 : 0;
-    return techOk && gearTier >= (requirement.gear ?? 0);
+    const gearTier = resources.gear >= 12 ? 3 : resources.gear >= 6 ? 2 : resources.gear >= 3 ? 1 : 0;
+    const protectionOk = Object.entries(requirement.protection ?? {}).every(([slot, amount]) => protection[slot as ProtectionSlotId] >= Number(amount ?? 0));
+    return techOk && protectionOk && gearTier >= (requirement.gear ?? 0);
   };
 
   const actions = [
@@ -465,11 +413,7 @@ function RegionActionButtons() {
       {actions.map((item) => (
         <button key={item.kind} disabled={item.disabled} onClick={() => launchExpedition(regionDefinition.id, item.kind)}>
           <span>{item.label}</span>
-          <small>
-            {item.disabled && item.kind !== "survey"
-              ? getBlockedReason(item.requirement, researched, resources.gear)
-              : getRequirementSummary(item.requirement, researched, resources.gear).join(" / ")}
-          </small>
+          <small>{item.disabled && item.kind !== "survey" ? getBlockedReason(item.requirement, researched, resources.gear, protection) : getRequirementSummary(item.requirement, researched, resources.gear, protection).join(" / ")}</small>
         </button>
       ))}
     </div>
@@ -485,15 +429,19 @@ function DetailsPanel() {
   const buildInSlot = useGameStore((state) => state.buildInSlot);
   const toggleBuilding = useGameStore((state) => state.toggleBuilding);
   const upgradeBuilding = useGameStore((state) => state.upgradeBuilding);
+  const chooseBuildingUpgrade = useGameStore((state) => state.chooseBuildingUpgrade);
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
   const startResearch = useGameStore((state) => state.startResearch);
   const resources = useGameStore((state) => state.resources);
+  const protection = useGameStore((state) => state.population.protection);
 
   const selectedRegion = selectedRegionId ? regionMap[selectedRegionId] : null;
   const selectedRegionState = regions.find((region) => region.id === selectedRegionId);
   const selectedSlot = districtSlots.find((slot) => slot.id === selectedSlotId);
   const existingBuilding = buildings.find((item) => item.slotId === selectedSlotId);
+  const existingDefinition = existingBuilding ? buildingMap[existingBuilding.buildingId] : null;
+  const effectiveBuilding = existingBuilding && existingDefinition ? getEffectiveBuildingData(existingDefinition, existingBuilding) : null;
   const buildOptions = buildingDefinitions.filter((definition) => {
     if (definition.unlockTech && !researched.includes(definition.unlockTech)) return false;
     return !buildings.some((instance) => instance.slotId === selectedSlotId);
@@ -512,22 +460,10 @@ function DetailsPanel() {
           </div>
           <p className="panel-copy">{selectedRegion.description}</p>
           <div className="panel-grid">
-            <div>
-              <span>Ring</span>
-              <strong>{selectedRegion.ring}</strong>
-            </div>
-            <div>
-              <span>Terrain</span>
-              <strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong>
-            </div>
-            <div>
-              <span>Hexes</span>
-              <strong>{selectedRegion.hexTileIds.length}</strong>
-            </div>
-            <div>
-              <span>Hazards</span>
-              <strong>{Object.entries(selectedRegion.hazard).map(([hazard, score]) => `${hazard} ${score}`).join(" / ")}</strong>
-            </div>
+            <div><span>Ring</span><strong>{selectedRegion.ring}</strong></div>
+            <div><span>Terrain</span><strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong></div>
+            <div><span>Hexes</span><strong>{selectedRegion.hexTileIds.length}</strong></div>
+            <div><span>Hazards</span><strong>{Object.entries(selectedRegion.hazard).map(([hazard, score]) => `${hazard} ${score}`).join(" / ")}</strong></div>
           </div>
           <div className="subsection">
             <h3>Yield</h3>
@@ -541,11 +477,15 @@ function DetailsPanel() {
             </ul>
           </div>
           <div className="subsection">
+            <h3>Protection</h3>
+            <div className="flow-tags"><span className="flow-tag">Current: {formatProtection(protection)}</span></div>
+          </div>
+          <div className="subsection">
             <h3>Action Gates</h3>
             <div className="flow-tags">
-              <span className="flow-tag">Survey: {getRequirementSummary(selectedRegion.access, researched, resources.gear).join(" / ")}</span>
-              <span className="flow-tag">Exploit: {getRequirementSummary(selectedRegion.exploit, researched, resources.gear).join(" / ")}</span>
-              <span className="flow-tag">Secure: {getRequirementSummary(selectedRegion.secure, researched, resources.gear).join(" / ")}</span>
+              <span className="flow-tag">Survey: {getRequirementSummary(selectedRegion.access, researched, resources.gear, protection).join(" / ")}</span>
+              <span className="flow-tag">Exploit: {getRequirementSummary(selectedRegion.exploit, researched, resources.gear, protection).join(" / ")}</span>
+              <span className="flow-tag">Secure: {getRequirementSummary(selectedRegion.secure, researched, resources.gear, protection).join(" / ")}</span>
             </div>
           </div>
           <div className="subsection">
@@ -563,46 +503,69 @@ function DetailsPanel() {
               <h2>{selectedSlot.label}</h2>
             </div>
           </div>
-          {existingBuilding ? (
+          {existingBuilding && existingDefinition && effectiveBuilding ? (
             <>
-              <p className="panel-copy">{buildingMap[existingBuilding.buildingId].description}</p>
+              <p className="panel-copy">{existingDefinition.description}</p>
               <div className="meta-list">
-                <div className="meta-row"><span>Building</span><strong>{buildingMap[existingBuilding.buildingId].name}</strong></div>
+                <div className="meta-row"><span>Building</span><strong>{existingDefinition.name}</strong></div>
                 <div className="meta-row"><span>Status</span><strong className={`status-tag ${existingBuilding.enabled ? "online" : "offline"}`}>{existingBuilding.enabled ? "Online" : "Standby"}</strong></div>
                 <div className="meta-row"><span>Level</span><strong>L{existingBuilding.level}</strong></div>
-                <div className="meta-row"><span>Staff</span><strong>{Object.entries(buildingMap[existingBuilding.buildingId].staff).map(([role, amount]) => `${amount} ${role}`).join(" / ") || "No assigned staff"}</strong></div>
+                <div className="meta-row"><span>Staff</span><strong>{Object.entries(existingDefinition.staff).map(([role, amount]) => `${amount} ${role}`).join(" / ") || "No assigned staff"}</strong></div>
+                <div className="meta-row"><span>Doctrine</span><strong>{effectiveBuilding.selectedUpgrade?.name ?? "Base chassis"}</strong></div>
               </div>
               <div className="subsection">
                 <h3>Output</h3>
-                <div className="flow-tags">
-                  {formatFlow(buildingMap[existingBuilding.buildingId].output, existingBuilding.level).map((item) => (
-                    <span key={item} className="flow-tag positive">{item}</span>
-                  ))}
-                </div>
+                <div className="flow-tags">{formatFlow(effectiveBuilding.output, existingBuilding.level).map((item) => <span key={item} className="flow-tag positive">{item}</span>)}</div>
               </div>
               <div className="subsection">
                 <h3>Upkeep</h3>
+                <div className="flow-tags">{formatFlow(effectiveBuilding.upkeep, existingBuilding.level, true).map((item) => <span key={item} className="flow-tag">{item}</span>)}</div>
+              </div>
+              <div className="subsection">
+                <h3>Tradeoffs</h3>
                 <div className="flow-tags">
-                  {formatFlow(buildingMap[existingBuilding.buildingId].upkeep, existingBuilding.level, true).map((item) => (
-                    <span key={item} className="flow-tag">{item}</span>
-                  ))}
+                  {effectiveBuilding.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>)}
+                  {effectiveBuilding.emissions ? <span className="flow-tag warning">Emissions +{effectiveBuilding.emissions.toFixed(2)}</span> : null}
+                  {effectiveBuilding.wasteOutput.pollution ? <span className="flow-tag warning">Pollution +{effectiveBuilding.wasteOutput.pollution.toFixed(2)}</span> : null}
+                  {Object.keys(effectiveBuilding.storageCapacity).length > 0 ? <span className="flow-tag">Storage: {formatFlow(effectiveBuilding.storageCapacity)}</span> : null}
+                  {Object.keys(effectiveBuilding.protectionOutput).length > 0 ? <span className="flow-tag">Protection: {formatProtection(effectiveBuilding.protectionOutput as Record<ProtectionSlotId, number>)}</span> : null}
                 </div>
               </div>
+              {existingBuilding.level >= 2 && (existingDefinition.upgradeOptions?.length ?? 0) > 0 ? (
+                <div className="subsection">
+                  <h3>Doctrine Upgrade</h3>
+                  {effectiveBuilding.selectedUpgrade ? (
+                    <div className="card-emphasis doctrine-card">
+                      <strong>{effectiveBuilding.selectedUpgrade.name}</strong>
+                      <span>{effectiveBuilding.selectedUpgrade.description}</span>
+                    </div>
+                  ) : (
+                    <div className="build-list doctrine-list">
+                      {existingDefinition.upgradeOptions?.map((option) => (
+                        <button key={option.id} className="build-option doctrine-option" onClick={() => chooseBuildingUpgrade(selectedSlot.id, option.id)}>
+                          <span>{option.name}</span>
+                          <small>{option.description}</small>
+                          <small>{Object.entries(option.cost ?? {}).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${amount}`).join(" / ") || "No extra cost"}</small>
+                          <small>{(option.doctrineTags ?? []).join(" / ") || "generalist"}</small>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               <div className="subsection">
                 <h3>Actions</h3>
                 <div className="inline-actions">
                   <button onClick={() => toggleBuilding(selectedSlot.id)}>{existingBuilding.enabled ? "Put On Standby" : "Bring Online"}</button>
                   <button onClick={() => upgradeBuilding(selectedSlot.id)} disabled={existingBuilding.level >= 2}>
-                    {existingBuilding.level >= 2
-                      ? "Max Level"
-                      : `Upgrade (${Object.entries(buildingMap[existingBuilding.buildingId].cost).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${Math.ceil(Number(amount ?? 0) * 0.8 * existingBuilding.level)}`).join(" / ")})`}
+                    {existingBuilding.level >= 2 ? "Max Level" : `Upgrade (${Object.entries(existingDefinition.cost).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${Math.ceil(Number(amount ?? 0) * 0.8 * existingBuilding.level)}`).join(" / ")})`}
                   </button>
                 </div>
               </div>
             </>
           ) : (
             <>
-              <p className="panel-copy">Build into this district slot to widen your economy and unlock new region actions.</p>
+              <p className="panel-copy">Build into this district slot to widen your economy and unlock cleaner or dirtier doctrine paths.</p>
               <div className="subsection">
                 <h3>Build Menu</h3>
                 <div className="build-list">
@@ -610,6 +573,7 @@ function DetailsPanel() {
                     <button key={definition.id} className="build-option" onClick={() => buildInSlot(selectedSlot.id, definition.id)}>
                       <span>{definition.name}</span>
                       <small>{definition.description}</small>
+                      <small>{(definition.doctrineTags ?? []).join(" / ") || "generalist"}</small>
                     </button>
                   ))}
                   {buildOptions.length === 0 ? <div className="muted-box">All available buildings here are locked or already built.</div> : null}
@@ -630,22 +594,18 @@ function DetailsPanel() {
           </div>
           <div className="subsection">
             <h3>Active Research</h3>
-            <div className="card-emphasis">
-              {activeResearch
-                ? `${researchNodes.find((item) => item.id === activeResearch.nodeId)?.name ?? "Unknown"} (${activeResearch.progress.toFixed(0)}%)`
-                : "No active project"}
-            </div>
+            <div className="card-emphasis">{activeResearch ? `${researchNodes.find((item) => item.id === activeResearch.nodeId)?.name ?? "Unknown"} (${activeResearch.progress.toFixed(0)}%)` : "No active project"}</div>
           </div>
           <div className="tech-list">
             {researchNodes.map((node) => {
               const unlocked = researched.includes(node.id);
               const available = !unlocked && !activeResearch && node.prerequisites.every((item) => researched.includes(item)) && resources.research >= node.cost;
-
               return (
                 <button key={node.id} className={`tech-node ${unlocked ? "done" : available ? "available" : "locked"}`} onClick={() => startResearch(node.id)} disabled={!available}>
                   <span>{node.branch}</span>
                   <strong>{node.name}</strong>
                   <small>{node.description}</small>
+                  <small>{node.doctrineTags.join(" / ")}</small>
                 </button>
               );
             })}
@@ -659,17 +619,17 @@ function DetailsPanel() {
 function ResearchCanvas() {
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
-  const branches = ["Chemistry", "Protection", "Renewables", "Logistics", "Medicine", "Infrastructure", "Defense", "Scouting"];
+  const branches = [...new Set(researchNodes.map((node) => node.branch))];
 
   return (
     <section className="canvas-card">
       <div className="panel-header">
         <div>
           <p className="eyebrow">Research Lattice</p>
-          <h2>Chemistry, Protection, Logistics</h2>
+          <h2>Industrial Doctrine Spread</h2>
         </div>
       </div>
-      <div className="research-board">
+      <div className="research-board wide-board">
         {branches.map((branch) => (
           <div key={branch} className="branch-column">
             <h3>{branch}</h3>
@@ -678,6 +638,7 @@ function ResearchCanvas() {
                 <span>Tier {node.tier}</span>
                 <strong>{node.name}</strong>
                 <small>{node.description}</small>
+                <small>{node.doctrineTags.join(" / ")}</small>
               </article>
             ))}
           </div>
@@ -693,6 +654,7 @@ function BottomBar() {
   const activeEvent = useGameStore((state) => state.activeEvent);
   const expeditions = useGameStore((state) => state.expeditions);
   const log = useGameStore((state) => state.log);
+  const pollution = useGameStore((state) => state.pollution);
   const setSpeed = useGameStore((state) => state.setSpeed);
   const saveGame = useGameStore((state) => state.saveGame);
   const resetGame = useGameStore((state) => state.resetGame);
@@ -702,50 +664,31 @@ function BottomBar() {
     <footer className="bottom-bar">
       <div className="control-group">
         {speedOptions.map((option) => (
-          <button key={option} className={speed === option ? "active" : ""} onClick={() => setSpeed(option)}>
-            {option === 0 ? "Pause" : `${option}x`}
-          </button>
+          <button key={option} className={speed === option ? "active" : ""} onClick={() => setSpeed(option)}>{option === 0 ? "Pause" : `${option}x`}</button>
         ))}
         <button onClick={() => advanceTime(10000)}>Advance +10s</button>
         <button onClick={saveGame}>Save</button>
         <button className="danger-lite" onClick={resetGame}>Reset</button>
       </div>
-      <div className="status-block">
-        <span>Elapsed</span>
-        <strong>{Math.floor(elapsedSeconds / 60)}m {String(Math.floor(elapsedSeconds % 60)).padStart(2, "0")}s</strong>
-      </div>
-      <div className="status-block wide">
-        <span>Event</span>
-        <strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : "No active threat"}</strong>
-      </div>
-      <div className="status-block wide">
-        <span>Expeditions</span>
-        <strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong>
-      </div>
-      <div className="status-block wide">
-        <span>Log</span>
-        <strong>{log[0]}</strong>
-      </div>
+      <div className="status-block"><span>Elapsed</span><strong>{Math.floor(elapsedSeconds / 60)}m {String(Math.floor(elapsedSeconds % 60)).padStart(2, "0")}s</strong></div>
+      <div className="status-block wide"><span>Event</span><strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : "No active threat"}</strong></div>
+      <div className="status-block"><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
+      <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong></div>
+      <div className="status-block wide"><span>Log</span><strong>{log[0]}</strong></div>
     </footer>
   );
 }
 
 function AlertStack() {
   const alerts = useGameStore((state) => state.alerts);
-
-  return (
-    <div className="alert-stack">
-      {alerts.map((alert) => (
-        <div key={alert.id} className={`alert-card ${alert.tone}`}>{alert.text}</div>
-      ))}
-    </div>
-  );
+  return <div className="alert-stack">{alerts.map((alert) => <div key={alert.id} className={`alert-card ${alert.tone}`}>{alert.text}</div>)}</div>;
 }
 
 function OperationsPanel() {
   const buildings = useGameStore((state) => state.buildings);
   const expeditions = useGameStore((state) => state.expeditions);
   const population = useGameStore((state) => state.population);
+  const pollution = useGameStore((state) => state.pollution);
   const freeRoles = getFreeRoles(buildings, expeditions, population.roles);
 
   return (
@@ -754,18 +697,23 @@ function OperationsPanel() {
       <h2>Operations Board</h2>
       <div className="mini-grid">
         {Object.entries(freeRoles).map(([role, amount]) => (
-          <div key={role} className="mini-panel">
-            <span>{role}</span>
-            <strong>{amount}</strong>
-          </div>
+          <div key={role} className="mini-panel"><span>{role}</span><strong>{amount}</strong></div>
         ))}
       </div>
+      <div className="mini-panel wide-panel">
+        <span>Protection Spread</span>
+        <strong>{formatProtection(population.protection)}</strong>
+      </div>
+      <div className="mini-panel wide-panel">
+        <span>Doctrine Pressure</span>
+        <strong>{pollution < 20 ? "stable" : pollution < 40 ? "strained" : "hazardous"}</strong>
+      </div>
       <ol className="flat-list ordered">
-        <li>Survey nearby regions and anchor the first resource wedges around the city core.</li>
-        <li>Use standby mode when staff gets tight or you need to stabilize energy.</li>
-        <li>Upgrade your strongest buildings before overbuilding empty slots.</li>
-        <li>Push research into masks, pesticides, and relay control for outer hex access.</li>
-        <li>Watch contamination, water, and food before chasing deep expansion.</li>
+        <li>Use clean power and storage for stability, or fossil plants for sharp industrial tempo.</li>
+        <li>Pair bio fertilizer and resilient food chains when pollution starts to snowball.</li>
+        <li>Use radical pest control only when immediate suppression is worth the fallout.</li>
+        <li>Protection tiers now matter alongside gear; watch respiratory, chemical, radiation, and environmental coverage.</li>
+        <li>Pollution is a real city pressure now, not just a flavor note.</li>
       </ol>
     </section>
   );
@@ -804,3 +752,6 @@ export function App() {
     </div>
   );
 }
+
+
+

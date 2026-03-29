@@ -1,10 +1,14 @@
 export type ResourceId =
-  | "energy"
+  | "power"
   | "water"
   | "food"
   | "materials"
   | "biomass"
   | "feedstock"
+  | "coal"
+  | "oil"
+  | "glass"
+  | "fertilizer"
   | "pesticides"
   | "research"
   | "gear";
@@ -12,6 +16,18 @@ export type ResourceId =
 export type RoleId = "workers" | "technicians" | "researchers" | "rangers";
 export type ViewMode = "world" | "city" | "research";
 export type HazardId = "toxicity" | "spores" | "radiation" | "infestation";
+export type ProtectionSlotId = "respiratory" | "chemical" | "radiation" | "environmental";
+export type DoctrineTag =
+  | "clean"
+  | "fossil"
+  | "bio"
+  | "synthetic"
+  | "chemical"
+  | "radical"
+  | "engineered"
+  | "storage"
+  | "resilient";
+export type PestControlTag = "bio" | "chemical" | "industrial" | "radical";
 export type TerrainType =
   | "city-core"
   | "toxic-forest"
@@ -43,8 +59,27 @@ export interface ResourceDefinition {
 export type PartialRecord<K extends string, T> = Partial<Record<K, T>>;
 
 export interface HazardProfile extends PartialRecord<HazardId, number> {}
+export interface ProtectionProfile extends PartialRecord<ProtectionSlotId, number> {}
 export interface ResourceFlow extends PartialRecord<ResourceId, number> {}
 export interface StaffingCost extends PartialRecord<RoleId, number> {}
+export interface WasteOutput {
+  pollution?: number;
+}
+
+export interface BuildingUpgradeOption {
+  id: string;
+  name: string;
+  description: string;
+  cost?: ResourceFlow;
+  output?: ResourceFlow;
+  upkeep?: ResourceFlow;
+  wasteOutput?: WasteOutput;
+  emissions?: number;
+  storageCapacity?: ResourceFlow;
+  protectionOutput?: ProtectionProfile;
+  hazardMitigation?: PartialRecord<HazardId, number>;
+  doctrineTags?: DoctrineTag[];
+}
 
 export interface BuildingDefinition {
   id: string;
@@ -55,8 +90,17 @@ export interface BuildingDefinition {
   staff: StaffingCost;
   upkeep?: ResourceFlow;
   output?: ResourceFlow;
+  fuelInput?: ResourceFlow;
+  wasteOutput?: WasteOutput;
+  emissions?: number;
+  storageCapacity?: ResourceFlow;
+  protectionOutput?: ProtectionProfile;
   hazardMitigation?: PartialRecord<HazardId, number>;
+  hazardExposureModifier?: ProtectionProfile;
+  doctrineTags?: DoctrineTag[];
+  pestControlTags?: PestControlTag[];
   unlockTech?: string;
+  upgradeOptions?: BuildingUpgradeOption[];
 }
 
 export interface BuildingInstance {
@@ -64,6 +108,7 @@ export interface BuildingInstance {
   buildingId: string;
   enabled: boolean;
   level: number;
+  upgradeOptionId?: string;
 }
 
 export interface DistrictSlot {
@@ -76,6 +121,7 @@ export interface DistrictSlot {
 export interface SectorActionRequirement {
   tech?: string[];
   gear?: number;
+  protection?: ProtectionProfile;
 }
 
 export interface HexCoord {
@@ -134,6 +180,7 @@ export interface ResearchNode {
   cost: number;
   prerequisites: string[];
   unlocks: string[];
+  doctrineTags: DoctrineTag[];
 }
 
 export interface ActiveResearch {
@@ -167,6 +214,7 @@ export interface PopulationState {
   contamination: number;
   stability: number;
   roles: Record<RoleId, number>;
+  protection: Record<ProtectionSlotId, number>;
 }
 
 export interface AlertMessage {
@@ -178,6 +226,7 @@ export interface AlertMessage {
 export interface SnapshotState {
   elapsedSeconds: number;
   resources: Record<ResourceId, number>;
+  pollution: number;
   view: ViewMode;
   selectedRegionId: string | null;
   selectedSlotId: string | null;

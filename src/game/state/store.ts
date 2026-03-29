@@ -12,6 +12,8 @@ import type {
   Expedition,
   ExpeditionKind,
   HazardId,
+  ProtectionProfile,
+  ProtectionSlotId,
   RegionDefinition,
   ResourceFlow,
   ResourceId,
@@ -20,7 +22,7 @@ import type {
   ViewMode
 } from "../types";
 
-const STORAGE_KEY = "pestizide-punk-save-v4";
+const STORAGE_KEY = "pestizide-punk-save-v5";
 const BUILDING_RATE_SCALE = 0.15;
 const REGION_RATE_SCALE = 0.15;
 const MAX_BUILDING_LEVEL = 2;
@@ -28,22 +30,38 @@ const EVENT_SEQUENCE: ActiveEvent[] = [
   {
     id: "toxic-storm",
     title: "Toxic Storm Front",
-    description: "Solar output collapses and contamination climbs while the cloud passes.",
+    description: "Solar output slumps and airborne contamination rises while the front passes.",
     remaining: 30
   },
   {
     id: "swarm-raid",
     title: "Swarm Pressure",
-    description: "Mutant insects test the perimeter and chew through exposed stockpiles.",
+    description: "Mutant insects test the perimeter and punish weak food chains.",
     remaining: 26
   },
   {
     id: "contamination-surge",
     title: "Contamination Surge",
-    description: "Leaking runoff pushes city contamination upward until systems recover.",
+    description: "Runoff leaks push city pollution and contamination upward until systems recover.",
     remaining: 28
   }
 ];
+
+const zeroProtection = (): Record<ProtectionSlotId, number> => ({
+  respiratory: 0,
+  chemical: 0,
+  radiation: 0,
+  environmental: 0
+});
+
+const researchProtectionBonuses: Partial<Record<string, ProtectionProfile>> = {
+  "filter-masks": { respiratory: 1 },
+  "field-clinic": { environmental: 1 },
+  "papr-rigs": { respiratory: 2 },
+  "sealed-suits": { chemical: 2, environmental: 1 },
+  "decon-routines": { chemical: 1, radiation: 1 },
+  "hazmat-lockers": { radiation: 2 }
+};
 
 interface GameStore extends SnapshotState {
   setView: (view: ViewMode) => void;
@@ -52,6 +70,7 @@ interface GameStore extends SnapshotState {
   buildInSlot: (slotId: string, buildingId: string) => void;
   toggleBuilding: (slotId: string) => void;
   upgradeBuilding: (slotId: string) => void;
+  chooseBuildingUpgrade: (slotId: string, optionId: string) => void;
   startResearch: (nodeId: string) => void;
   launchExpedition: (regionId: string, kind: ExpeditionKind) => void;
   setSpeed: (speed: number) => void;
@@ -68,6 +87,53 @@ const buildingMap = Object.fromEntries(
 const regionMap = Object.fromEntries(
   regionDefinitions.map((region) => [region.id, region])
 ) as Record<string, RegionDefinition>;
+
+function mergeResourceFlow(base?: ResourceFlow, extra?: ResourceFlow) {
+  const merged: ResourceFlow = { ...(base ?? {}) };
+  Object.entries(extra ?? {}).forEach(([resourceId, amount]) => {
+    merged[resourceId as ResourceId] = Number(merged[resourceId as ResourceId] ?? 0) + Number(amount ?? 0);
+  });
+  return merged;
+}
+
+function mergeHazardFlow(base?: Partial<Record<HazardId, number>>, extra?: Partial<Record<HazardId, number>>) {
+  const merged: Partial<Record<HazardId, number>> = { ...(base ?? {}) };
+  Object.entries(extra ?? {}).forEach(([hazardId, amount]) => {
+    merged[hazardId as HazardId] = Number(merged[hazardId as HazardId] ?? 0) + Number(amount ?? 0);
+  });
+  return merged;
+}
+
+function mergeProtectionFlow(base?: ProtectionProfile, extra?: ProtectionProfile) {
+  const merged: ProtectionProfile = { ...(base ?? {}) };
+  Object.entries(extra ?? {}).forEach(([slotId, amount]) => {
+    merged[slotId as ProtectionSlotId] = Number(merged[slotId as ProtectionSlotId] ?? 0) + Number(amount ?? 0);
+  });
+  return merged;
+}
+
+function getSelectedUpgradeOption(definition: BuildingDefinition, instance: BuildingInstance) {
+  if (!instance.upgradeOptionId) return null;
+  return definition.upgradeOptions?.find((option) => option.id === instance.upgradeOptionId) ?? null;
+}
+
+function getEffectiveBuildingData(definition: BuildingDefinition, instance: BuildingInstance) {
+  const upgradeOption = getSelectedUpgradeOption(definition, instance);
+  const doctrineTags = [...new Set([...(definition.doctrineTags ?? []), ...(upgradeOption?.doctrineTags ?? [])])];
+  return {
+    output: mergeResourceFlow(definition.output, upgradeOption?.output),
+    upkeep: mergeResourceFlow(definition.upkeep, upgradeOption?.upkeep),
+    storageCapacity: mergeResourceFlow(definition.storageCapacity, upgradeOption?.storageCapacity),
+    protectionOutput: mergeProtectionFlow(definition.protectionOutput, upgradeOption?.protectionOutput),
+    hazardMitigation: mergeHazardFlow(definition.hazardMitigation, upgradeOption?.hazardMitigation),
+    emissions: Number(definition.emissions ?? 0) + Number(upgradeOption?.emissions ?? 0),
+    wasteOutput: {
+      pollution: Number(definition.wasteOutput?.pollution ?? 0) + Number(upgradeOption?.wasteOutput?.pollution ?? 0)
+    },
+    doctrineTags,
+    upgradeOption
+  };
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -96,6 +162,42 @@ function scaleValues<T extends string>(flow: Partial<Record<T, number>> | undefi
     scaled[key as T] = Number(amount ?? 0) * multiplier;
   });
   return scaled;
+}
+
+function mergeMaxProtection(target: Record<ProtectionSlotId, number>, source?: ProtectionProfile) {
+  if (!source) return;
+  Object.entries(source).forEach(([slot, amount]) => {
+    target[slot as ProtectionSlotId] = Math.max(target[slot as ProtectionSlotId], Number(amount ?? 0));
+  });
+}
+
+function addProtection(target: Record<ProtectionSlotId, number>, source?: ProtectionProfile, multiplier = 1) {
+  if (!source) return;
+  Object.entries(source).forEach(([slot, amount]) => {
+    target[slot as ProtectionSlotId] += Number(amount ?? 0) * multiplier;
+  });
+}
+
+function getTechProtection(state: SnapshotState) {
+  const protection = zeroProtection();
+  state.researched.forEach((techId) => {
+    mergeMaxProtection(protection, researchProtectionBonuses[techId]);
+  });
+  return protection;
+}
+
+function getProtectionProfile(state: SnapshotState) {
+  const protection = getTechProtection(state);
+  state.buildings.forEach((instance) => {
+    if (!instance.enabled) return;
+    const definition = buildingMap[instance.buildingId];
+    const effective = getEffectiveBuildingData(definition, instance);
+    addProtection(protection, effective.protectionOutput, getBuildingMultiplier(instance.level));
+  });
+  (Object.keys(protection) as ProtectionSlotId[]).forEach((slot) => {
+    protection[slot] = clamp(protection[slot], 0, 6);
+  });
+  return protection;
 }
 
 function getUpgradeCost(definition: BuildingDefinition, level: number) {
@@ -152,7 +254,8 @@ function getCityMitigation(state: SnapshotState) {
   state.buildings.forEach((instance) => {
     if (!instance.enabled) return;
     const definition = buildingMap[instance.buildingId];
-    const scaledMitigation = scaleValues(definition.hazardMitigation, getBuildingMultiplier(instance.level));
+    const effective = getEffectiveBuildingData(definition, instance);
+    const scaledMitigation = scaleValues(effective.hazardMitigation, getBuildingMultiplier(instance.level));
     Object.entries(scaledMitigation).forEach(([hazard, amount]) => {
       mitigation[hazard as HazardId] += Number(amount ?? 0);
     });
@@ -163,9 +266,7 @@ function getCityMitigation(state: SnapshotState) {
 
 function canAfford(resources: Record<ResourceId, number>, flow?: ResourceFlow) {
   if (!flow) return true;
-  return Object.entries(flow).every(
-    ([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0)
-  );
+  return Object.entries(flow).every(([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0));
 }
 
 function applyFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow, multiplier = 1) {
@@ -177,24 +278,33 @@ function applyFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow, m
 
 function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["access"]) {
   const techOk = (requirement.tech ?? []).every((techId) => hasResearch(state, techId));
-  const gearTier = state.resources.gear >= 10 ? 2 : state.resources.gear >= 4 ? 1 : 0;
-  return techOk && gearTier >= (requirement.gear ?? 0);
+  const gearTier = state.resources.gear >= 12 ? 3 : state.resources.gear >= 6 ? 2 : state.resources.gear >= 3 ? 1 : 0;
+  const protection = state.population.protection;
+  const protectionOk = Object.entries(requirement.protection ?? {}).every(
+    ([slot, amount]) => protection[slot as ProtectionSlotId] >= Number(amount ?? 0)
+  );
+  return techOk && protectionOk && gearTier >= (requirement.gear ?? 0);
 }
 
 function createInitialState(): SnapshotState {
-  return {
+  const initialState: SnapshotState = {
     elapsedSeconds: 0,
     resources: {
-      energy: 42,
+      power: 42,
       water: 26,
       food: 28,
       materials: 42,
-      biomass: 12,
-      feedstock: 8,
+      biomass: 14,
+      feedstock: 10,
+      coal: 8,
+      oil: 4,
+      glass: 6,
+      fertilizer: 4,
       pesticides: 4,
-      research: 18,
-      gear: 4
+      research: 24,
+      gear: 6
     },
+    pollution: 10,
     view: "world",
     selectedRegionId: "toxic-forest",
     selectedSlotId: null,
@@ -219,18 +329,21 @@ function createInitialState(): SnapshotState {
         technicians: 12,
         researchers: 10,
         rangers: 10
-      }
+      },
+      protection: zeroProtection()
     },
     speed: 0,
     alerts: [
       {
         id: "tutorial",
         tone: "info",
-        text: "Survey nearby hex-regions, unlock filter masks, then exploit biomass and salvage."
+        text: "Balance clean power, dirty fuel, food chains, and protection before pushing deeper regions."
       }
     ],
-    log: ["City council briefing ready. Reactor output stable. Hex frontier awaits survey."]
+    log: ["Industrial systems pass online. City core stable, pollution contained for now."]
   };
+  initialState.population.protection = getProtectionProfile(initialState);
+  return initialState;
 }
 
 function serializeState(state: SnapshotState) {
@@ -242,7 +355,9 @@ function loadState(): SnapshotState | null {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as SnapshotState;
+    const parsed = JSON.parse(raw) as SnapshotState;
+    parsed.population.protection = getProtectionProfile(parsed);
+    return parsed;
   } catch {
     return null;
   }
@@ -257,12 +372,11 @@ function cleanResourceBounds(state: SnapshotState) {
   (Object.keys(state.resources) as ResourceId[]).forEach((resourceId) => {
     state.resources[resourceId] = clamp(state.resources[resourceId], 0, 999);
   });
+  state.pollution = clamp(state.pollution, 0, 100);
 }
 
 function createExpedition(kind: ExpeditionKind, regionId: string): Expedition {
-  const baseDuration =
-    kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
-
+  const baseDuration = kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
   return {
     id: `${kind}-${regionId}-${Math.random().toString(36).slice(2, 7)}`,
     regionId,
@@ -288,74 +402,82 @@ function tickState(state: SnapshotState, seconds: number) {
   state.elapsedSeconds += dt;
   const activeEvent = state.activeEvent;
   const mitigation = getCityMitigation(state);
+  const storageScore = state.buildings.filter((instance) => instance.enabled && buildingMap[instance.buildingId].doctrineTags?.includes("storage")).reduce((sum, instance) => sum + instance.level, 0);
 
   const baseDelta: Record<ResourceId, number> = {
-    energy: 0.6,
+    power: 0.55,
     water: -0.12,
     food: -0.08,
     materials: 0,
     biomass: 0,
     feedstock: 0,
+    coal: 0,
+    oil: 0,
+    glass: 0,
+    fertilizer: 0,
     pesticides: 0,
     research: 0.02,
     gear: 0
   };
 
+  let pollutionDelta = -0.05;
+
   state.buildings.forEach((instance) => {
     if (!instance.enabled) return;
     const definition = buildingMap[instance.buildingId];
-    const buildingMultiplier = getBuildingMultiplier(instance.level) * BUILDING_RATE_SCALE;
-    const weatherMultiplier =
-      activeEvent?.id === "toxic-storm" && instance.buildingId === "solar-array" ? 0.35 : 1;
-    Object.entries(definition.upkeep ?? {}).forEach(([resourceId, amount]) => {
-      baseDelta[resourceId as ResourceId] -= Number(amount ?? 0) * weatherMultiplier * buildingMultiplier;
+    const effective = getEffectiveBuildingData(definition, instance);
+    const multiplier = getBuildingMultiplier(instance.level) * BUILDING_RATE_SCALE;
+    const weatherMultiplier = activeEvent?.id === "toxic-storm" && instance.buildingId === "solar-array" ? 0.35 : 1;
+
+    Object.entries(effective.upkeep ?? {}).forEach(([resourceId, amount]) => {
+      baseDelta[resourceId as ResourceId] -= Number(amount ?? 0) * weatherMultiplier * multiplier;
     });
-    Object.entries(definition.output ?? {}).forEach(([resourceId, amount]) => {
-      baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * weatherMultiplier * buildingMultiplier;
+
+    Object.entries(effective.output ?? {}).forEach(([resourceId, amount]) => {
+      baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * weatherMultiplier * multiplier;
     });
+
+    pollutionDelta += Number(effective.emissions ?? 0) * multiplier;
+    pollutionDelta += Number(effective.wasteOutput?.pollution ?? 0) * multiplier;
   });
 
   state.regions.forEach((regionRuntime) => {
     const definition = regionMap[regionRuntime.id];
     if (regionRuntime.state === "exploiting" || regionRuntime.state === "secured") {
       Object.entries(definition.resources).forEach(([resourceId, amount]) => {
-        if (resourceId in baseDelta) {
-          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * 0.5 * REGION_RATE_SCALE;
-        }
+        baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * 0.5 * REGION_RATE_SCALE;
       });
     }
     if (regionRuntime.state === "outpost") {
       Object.entries(definition.resources).forEach(([resourceId, amount]) => {
-        if (resourceId in baseDelta) {
-          baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * REGION_RATE_SCALE;
-        }
+        baseDelta[resourceId as ResourceId] += Number(amount ?? 0) * REGION_RATE_SCALE;
       });
     }
   });
 
   if (activeEvent?.id === "toxic-storm") {
-    baseDelta.energy -= 0.3;
+    baseDelta.power -= Math.max(0.08, 0.35 - storageScore * 0.08);
     state.population.contamination += Math.max(0.05, 0.12 - mitigation.toxicity * 0.03) * dt;
   }
 
   if (activeEvent?.id === "swarm-raid") {
-    const sprayTowerScore = state.buildings.filter(
-      (instance) => instance.enabled && instance.buildingId === "spray-tower"
-    ).reduce((sum, instance) => sum + instance.level, 0);
-    if (sprayTowerScore === 0) {
-      baseDelta.food -= 0.2;
+    const towerScore = state.buildings.filter((instance) => instance.enabled && ["spray-tower", "fumigation-tower"].includes(instance.buildingId)).reduce((sum, instance) => sum + instance.level, 0);
+    if (towerScore === 0) {
+      baseDelta.food -= 0.22;
       state.population.stability -= 0.12 * dt;
     }
   }
 
   if (activeEvent?.id === "contamination-surge") {
     baseDelta.water -= 0.2;
+    pollutionDelta += 0.16;
     state.population.contamination += Math.max(0.04, 0.1 - mitigation.spores * 0.02) * dt;
   }
 
   (Object.keys(baseDelta) as ResourceId[]).forEach((resourceId) => {
     state.resources[resourceId] += baseDelta[resourceId] * dt;
   });
+  state.pollution += pollutionDelta * dt;
 
   if (state.resources.food <= 4) {
     state.population.health -= 0.18 * dt;
@@ -367,14 +489,22 @@ function tickState(state: SnapshotState, seconds: number) {
     state.population.contamination += 0.18 * dt;
   }
 
-  if (state.resources.energy <= 2) {
+  if (state.resources.power <= 2) {
     state.population.stability -= 0.18 * dt;
   }
 
-  const clinicScore = state.buildings
-    .filter((instance) => instance.enabled && instance.buildingId === "clinic")
-    .reduce((sum, instance) => sum + instance.level, 0);
+  const clinicScore = state.buildings.filter((instance) => instance.enabled && instance.buildingId === "clinic").reduce((sum, instance) => sum + instance.level, 0);
   state.population.contamination -= clinicScore * 0.08 * dt;
+
+  if (state.pollution > 20) {
+    state.population.contamination += Math.max(0, state.pollution - 20) * 0.006 * dt;
+  }
+  if (state.pollution > 35) {
+    state.population.stability -= Math.max(0, state.pollution - 35) * 0.008 * dt;
+  }
+  if (state.pollution > 55) {
+    state.population.health -= Math.max(0, state.pollution - 55) * 0.006 * dt;
+  }
 
   if (state.population.contamination > 40) {
     state.population.health -= 0.12 * dt;
@@ -382,12 +512,13 @@ function tickState(state: SnapshotState, seconds: number) {
   }
 
   if (state.activeResearch) {
-    const researchRate = 0.6 + state.resources.research * 0.01;
+    const researchRate = 0.65 + state.resources.research * 0.01;
     state.activeResearch.progress += researchRate * dt;
     const node = researchNodes.find((item) => item.id === state.activeResearch?.nodeId);
     if (node && state.activeResearch.progress >= node.cost) {
       state.researched = [...state.researched, node.id];
       state.activeResearch = null;
+      state.population.protection = getProtectionProfile(state);
       state.alerts = appendAlert(state.alerts, {
         id: `research-${node.id}`,
         tone: "success",
@@ -411,16 +542,13 @@ function tickState(state: SnapshotState, seconds: number) {
         regionRuntime.discovered = true;
         applyFlow(state.resources, regionDefinition.surveyReward);
       }
-
       if (expedition.kind === "exploit") {
         regionRuntime.state = "exploiting";
       }
-
       if (expedition.kind === "secure") {
         regionRuntime.state = "secured";
         applyFlow(state.resources, regionDefinition.secureReward);
       }
-
       if (expedition.kind === "outpost") {
         regionRuntime.state = "outpost";
       }
@@ -441,8 +569,7 @@ function tickState(state: SnapshotState, seconds: number) {
       state.log = appendLog(state.log, `${activeEvent.title} dissipated.`);
     }
   } else if (Math.floor(previousElapsed / 90) < Math.floor(state.elapsedSeconds / 90)) {
-    const template =
-      EVENT_SEQUENCE[(Math.floor(state.elapsedSeconds / 90) - 1) % EVENT_SEQUENCE.length];
+    const template = EVENT_SEQUENCE[(Math.floor(state.elapsedSeconds / 90) - 1) % EVENT_SEQUENCE.length];
     state.activeEvent = { ...template };
     state.alerts = appendAlert(state.alerts, {
       id: `event-${Math.floor(state.elapsedSeconds)}`,
@@ -452,31 +579,23 @@ function tickState(state: SnapshotState, seconds: number) {
     state.log = appendLog(state.log, `Threat event: ${template.title}`);
   }
 
+  state.population.protection = getProtectionProfile(state);
   state.population.health = clamp(state.population.health, 0, 100);
   state.population.contamination = clamp(state.population.contamination, 0, 100);
   state.population.stability = clamp(state.population.stability, 0, 100);
   cleanResourceBounds(state);
 
   if (state.resources.food <= 6) {
-    state.alerts = appendAlert(state.alerts, {
-      id: "low-food",
-      tone: "warning",
-      text: "Food stores are running low."
-    });
+    state.alerts = appendAlert(state.alerts, { id: "low-food", tone: "warning", text: "Food stores are running low." });
   }
   if (state.resources.water <= 6) {
-    state.alerts = appendAlert(state.alerts, {
-      id: "low-water",
-      tone: "warning",
-      text: "Water purification is under pressure."
-    });
+    state.alerts = appendAlert(state.alerts, { id: "low-water", tone: "warning", text: "Water purification is under pressure." });
   }
-  if (state.population.contamination >= 35) {
-    state.alerts = appendAlert(state.alerts, {
-      id: "high-contamination",
-      tone: "danger",
-      text: "City contamination is reaching dangerous levels."
-    });
+  if (state.resources.power <= 8) {
+    state.alerts = appendAlert(state.alerts, { id: "low-power", tone: "warning", text: "Power reserves are sagging under current load." });
+  }
+  if (state.pollution >= 35) {
+    state.alerts = appendAlert(state.alerts, { id: "high-pollution", tone: "danger", text: "City pollution is amplifying contamination and unrest." });
   }
 }
 
@@ -484,6 +603,7 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
   return {
     elapsedSeconds: state.elapsedSeconds,
     resources: { ...state.resources },
+    pollution: state.pollution,
     view: state.view,
     selectedRegionId: state.selectedRegionId,
     selectedSlotId: state.selectedSlotId,
@@ -492,14 +612,12 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     regions: state.regions.map((region) => ({ ...region })),
     researched: [...state.researched],
     activeResearch: state.activeResearch ? { ...state.activeResearch } : null,
-    expeditions: state.expeditions.map((expedition) => ({
-      ...expedition,
-      staff: { ...expedition.staff }
-    })),
+    expeditions: state.expeditions.map((expedition) => ({ ...expedition, staff: { ...expedition.staff } })),
     activeEvent: state.activeEvent ? { ...state.activeEvent } : null,
     population: {
       ...state.population,
-      roles: { ...state.population.roles }
+      roles: { ...state.population.roles },
+      protection: { ...state.population.protection }
     },
     speed: state.speed,
     alerts: state.alerts.map((alert) => ({ ...alert })),
@@ -539,9 +657,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
 
       const freeRoles = getFreeRoles(state);
-      const staffOk = Object.entries(definition.staff).every(
-        ([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0)
-      );
+      const staffOk = Object.entries(definition.staff).every(([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0));
       if (!staffOk) {
         return {
           ...state,
@@ -559,12 +675,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
         ...state,
         resources,
         buildings: [...state.buildings, { slotId, buildingId, enabled: true, level: 1 } as BuildingInstance],
+        population: { ...state.population, protection: getProtectionProfile({ ...state, resources, buildings: [...state.buildings, { slotId, buildingId, enabled: true, level: 1 }] as BuildingInstance[] }) },
         log: appendLog(state.log, `${definition.name} commissioned at ${slot.label}.`),
-        alerts: appendAlert(state.alerts, {
-          id: `build-${slotId}`,
-          tone: "success",
-          text: `${definition.name} built at ${slot.label}.`
-        }),
+        alerts: appendAlert(state.alerts, { id: `build-${slotId}`, tone: "success", text: `${definition.name} built at ${slot.label}.` }),
         selectedSlotId: slotId
       };
       saveState(nextState);
@@ -576,39 +689,28 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const building = state.buildings.find((item) => item.slotId === slotId);
       if (!building) return state;
       const definition = buildingMap[building.buildingId];
-      if (building.enabled) {
-        const nextState = {
-          ...state,
-          buildings: state.buildings.map((item) =>
-            item.slotId === slotId ? { ...item, enabled: false } : item
-          ),
-          log: appendLog(state.log, `${definition.name} put on standby.`)
-        };
-        saveState(nextState);
-        return nextState;
+
+      if (!building.enabled) {
+        const freeRoles = getFreeRoles(state);
+        const staffOk = Object.entries(definition.staff).every(([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0));
+        if (!staffOk) {
+          return {
+            ...state,
+            alerts: appendAlert(state.alerts, {
+              id: `reactivate-${slotId}`,
+              tone: "warning",
+              text: `Not enough free staff to reactivate ${definition.name}.`
+            })
+          };
+        }
       }
 
-      const freeRoles = getFreeRoles(state);
-      const staffOk = Object.entries(definition.staff).every(
-        ([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0)
-      );
-      if (!staffOk) {
-        return {
-          ...state,
-          alerts: appendAlert(state.alerts, {
-            id: `reactivate-${slotId}`,
-            tone: "warning",
-            text: `Not enough free staff to reactivate ${definition.name}.`
-          })
-        };
-      }
-
+      const buildings = state.buildings.map((item) => item.slotId === slotId ? { ...item, enabled: !item.enabled } : item);
       const nextState = {
         ...state,
-        buildings: state.buildings.map((item) =>
-          item.slotId === slotId ? { ...item, enabled: true } : item
-        ),
-        log: appendLog(state.log, `${definition.name} brought back online.`)
+        buildings,
+        population: { ...state.population, protection: getProtectionProfile({ ...state, buildings }) },
+        log: appendLog(state.log, `${definition.name} ${building.enabled ? "put on standby" : "brought back online"}.`)
       };
       saveState(nextState);
       return nextState;
@@ -617,8 +719,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   upgradeBuilding: (slotId) =>
     set((state) => {
       const building = state.buildings.find((item) => item.slotId === slotId);
-      if (!building) return state;
-      if (building.level >= MAX_BUILDING_LEVEL) return state;
+      if (!building || building.level >= MAX_BUILDING_LEVEL) return state;
       const definition = buildingMap[building.buildingId];
       const upgradeCost = getUpgradeCost(definition, building.level);
       if (!canAfford(state.resources, upgradeCost)) {
@@ -634,12 +735,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
       const resources = { ...state.resources };
       applyFlow(resources, upgradeCost, -1);
+      const buildings = state.buildings.map((item) => item.slotId === slotId ? { ...item, level: item.level + 1 } : item);
       const nextState = {
         ...state,
         resources,
-        buildings: state.buildings.map((item) =>
-          item.slotId === slotId ? { ...item, level: item.level + 1 } : item
-        ),
+        buildings,
+        population: { ...state.population, protection: getProtectionProfile({ ...state, resources, buildings }) },
         log: appendLog(state.log, `${definition.name} upgraded to level ${building.level + 1}.`),
         alerts: appendAlert(state.alerts, {
           id: `upgrade-ok-${slotId}`,
@@ -651,20 +752,53 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
+  chooseBuildingUpgrade: (slotId, optionId) =>
+    set((state) => {
+      const building = state.buildings.find((item) => item.slotId === slotId);
+      if (!building || building.level < MAX_BUILDING_LEVEL || building.upgradeOptionId) return state;
+      const definition = buildingMap[building.buildingId];
+      const upgradeOption = definition.upgradeOptions?.find((option) => option.id === optionId);
+      if (!upgradeOption) return state;
+      if (!canAfford(state.resources, upgradeOption.cost)) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, {
+            id: `doctrine-${slotId}`,
+            tone: "warning",
+            text: `Insufficient stock to commission ${upgradeOption.name}.`
+          })
+        };
+      }
+
+      const resources = { ...state.resources };
+      applyFlow(resources, upgradeOption.cost, -1);
+      const buildings = state.buildings.map((item) => item.slotId === slotId ? { ...item, upgradeOptionId: optionId } : item);
+      const nextState = {
+        ...state,
+        resources,
+        buildings,
+        pollution: clamp(state.pollution + Math.max(0, Number(upgradeOption.wasteOutput?.pollution ?? 0) * 2), 0, 100),
+        population: { ...state.population, protection: getProtectionProfile({ ...state, resources, buildings }) },
+        log: appendLog(state.log, `${definition.name} doctrine locked: ${upgradeOption.name}.`),
+        alerts: appendAlert(state.alerts, {
+          id: `doctrine-ok-${slotId}`,
+          tone: "success",
+          text: `${definition.name} now runs the ${upgradeOption.name} doctrine.`
+        })
+      };
+      saveState(nextState);
+      return nextState;
+    }),
+
   startResearch: (nodeId) =>
     set((state) => {
       const node = researchNodes.find((item) => item.id === nodeId);
       if (!node || hasResearch(state, nodeId) || state.activeResearch) return state;
-      const prerequisitesMet = node.prerequisites.every((item) => hasResearch(state, item));
-      if (!prerequisitesMet) return state;
+      if (!node.prerequisites.every((item) => hasResearch(state, item))) return state;
       if (state.resources.research < node.cost) {
         return {
           ...state,
-          alerts: appendAlert(state.alerts, {
-            id: `research-short-${nodeId}`,
-            tone: "warning",
-            text: `Need ${node.cost} research to start ${node.name}.`
-          })
+          alerts: appendAlert(state.alerts, { id: `research-short-${nodeId}`, tone: "warning", text: `Need ${node.cost} research to start ${node.name}.` })
         };
       }
       const nextState = {
@@ -683,50 +817,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
       const regionRuntime = state.regions.find((item) => item.id === regionId);
       if (!regionDefinition || !regionRuntime) return state;
 
-      const requirement =
-        kind === "survey"
-          ? regionDefinition.access
-          : kind === "exploit"
-            ? regionDefinition.exploit
-            : kind === "secure"
-              ? regionDefinition.secure
-              : { tech: ["relay-network"] };
+      const requirement = kind === "survey"
+        ? regionDefinition.access
+        : kind === "exploit"
+          ? regionDefinition.exploit
+          : kind === "secure"
+            ? regionDefinition.secure
+            : { tech: ["relay-network"] };
 
       if (!meetsRequirement(state, requirement)) {
         return {
           ...state,
-          alerts: appendAlert(state.alerts, {
-            id: `requirement-${regionId}-${kind}`,
-            tone: "warning",
-            text: `${regionDefinition.name} needs more tech or gear for ${kind}.`
-          })
+          alerts: appendAlert(state.alerts, { id: `requirement-${regionId}-${kind}`, tone: "warning", text: `${regionDefinition.name} needs more tech, protection, or gear for ${kind}.` })
         };
       }
-
       if (state.expeditions.some((item) => item.regionId === regionId)) return state;
+
       const expedition = createExpedition(kind, regionId);
       const freeRoles = getFreeRoles(state);
-      const staffOk = Object.entries(expedition.staff).every(
-        ([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0)
-      );
+      const staffOk = Object.entries(expedition.staff).every(([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0));
       if (!staffOk) {
         return {
           ...state,
-          alerts: appendAlert(state.alerts, {
-            id: `expedition-staff-${regionId}`,
-            tone: "warning",
-            text: `Not enough free staff for ${kind} mission.`
-          })
+          alerts: appendAlert(state.alerts, { id: `expedition-staff-${regionId}`, tone: "warning", text: `Not enough free staff for ${kind} mission.` })
         };
       }
 
       const nextState = {
         ...state,
-        regions: state.regions.map((region) =>
-          region.id === regionId && kind === "survey"
-            ? { ...region, state: "surveying" as const }
-            : region
-        ),
+        regions: state.regions.map((region) => region.id === regionId && kind === "survey" ? { ...region, state: "surveying" as const } : region),
         expeditions: [...state.expeditions, expedition],
         log: appendLog(state.log, `${regionDefinition.name}: ${kind} mission launched.`)
       };
@@ -744,9 +863,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
-  saveGame: () => {
-    saveState(get());
-  },
+  saveGame: () => saveState(get()),
 
   resetGame: () => {
     const nextState = createInitialState();
@@ -763,40 +880,35 @@ export const useGameStore = create<GameStore>((set, get) => ({
       selectedRegionId: state.selectedRegionId,
       selectedSlotId: state.selectedSlotId,
       resources: state.resources,
+      pollution: state.pollution,
       population: {
         health: state.population.health,
         contamination: state.population.contamination,
         stability: state.population.stability,
+        protection: state.population.protection,
         freeRoles: getFreeRoles(state)
       },
       buildings: state.buildings.map((building) => ({
         slotId: building.slotId,
         buildingId: building.buildingId,
         level: building.level,
-        enabled: building.enabled
+        enabled: building.enabled,
+        doctrineTags: getEffectiveBuildingData(buildingMap[building.buildingId], building).doctrineTags,
       })),
       activeResearch: state.activeResearch,
       activeEvent: state.activeEvent?.title ?? null,
-      expeditions: state.expeditions.map((item) => ({
-        regionId: item.regionId,
-        kind: item.kind,
-        remaining: item.remaining
-      })),
-      regions: state.regions.map((region) => ({
-        id: region.id,
-        state: region.state,
-        discovered: region.discovered,
-        hexCount: regionMap[region.id]?.hexTileIds.length ?? 0
-      })),
+      expeditions: state.expeditions.map((item) => ({ regionId: item.regionId, kind: item.kind, remaining: item.remaining })),
+      regions: state.regions.map((region) => ({ id: region.id, state: region.state, discovered: region.discovered, hexCount: regionMap[region.id]?.hexTileIds.length ?? 0 })),
       worldHexes: {
         total: worldHexes.length,
-        discovered: worldHexes.filter((tile) => {
-          if (tile.isCityCore) return true;
-          if (!tile.regionId) return false;
-          return state.regions.find((region) => region.id === tile.regionId)?.discovered;
-        }).length
+        discovered: worldHexes.filter((tile) => tile.isCityCore || (tile.regionId ? state.regions.find((region) => region.id === tile.regionId)?.discovered : false)).length
       },
       alerts: state.alerts.map((alert) => alert.text)
     });
   }
 }));
+
+
+
+
+
