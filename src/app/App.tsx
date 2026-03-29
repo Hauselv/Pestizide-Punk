@@ -16,6 +16,7 @@ import type {
   HexCoord,
   HexTileDefinition,
   ProtectionSlotId,
+  ResearchNode,
   RegionStateId,
   ResourceFlow,
   ResourceId,
@@ -27,6 +28,7 @@ import type {
 
 const buildingMap = Object.fromEntries(buildingDefinitions.map((definition) => [definition.id, definition])) as Record<string, BuildingDefinition>;
 const regionMap = Object.fromEntries(regionDefinitions.map((definition) => [definition.id, definition]));
+const researchNodeMap = Object.fromEntries(researchNodes.map((node) => [node.id, node])) as Record<string, ResearchNode>;
 
 function getBuildingVisual(buildingId: string, fallbackLabel: string) {
   return buildingVisualMap[buildingId] ?? {
@@ -55,14 +57,14 @@ const HEX_SIZE = 41;
 const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
 const WORLD_PADDING = HEX_SIZE * 2.6;
 const TERRAIN_TYPES = [...new Set(worldHexes.map((tile) => tile.terrainType))] as TerrainType[];
-const RESEARCH_TREE_ROOT_X = 34;
-const RESEARCH_TREE_TIER_X = 280;
-const RESEARCH_TREE_COLUMN_WIDTH = 248;
-const RESEARCH_TREE_COLUMN_GAP = 42;
-const RESEARCH_TREE_NODE_WIDTH = 216;
-const RESEARCH_TREE_NODE_HEIGHT = 92;
-const RESEARCH_TREE_ROW_GAP = 18;
-const RESEARCH_TREE_GROUP_GAP = 30;
+const RESEARCH_TREE_ROOT_X = 26;
+const RESEARCH_TREE_TIER_X = 214;
+const RESEARCH_TREE_COLUMN_WIDTH = 216;
+const RESEARCH_TREE_COLUMN_GAP = 26;
+const RESEARCH_TREE_NODE_WIDTH = 186;
+const RESEARCH_TREE_NODE_HEIGHT = 78;
+const RESEARCH_TREE_ROW_GAP = 12;
+const RESEARCH_TREE_GROUP_GAP = 18;
 const RESEARCH_BRANCH_COLORS: Record<string, string> = {
   Scouting: "#8db0a3",
   Infrastructure: "#87b7c9",
@@ -277,16 +279,76 @@ function getResearchBranchColor(branch: string) {
 }
 
 function getResearchNodeState(nodeId: string, researched: string[], activeResearchNodeId?: string | null, researchPoints = 0) {
-  const node = researchNodes.find((item) => item.id === nodeId);
+  const node = researchNodeMap[nodeId];
   if (!node) return "locked" as const;
   if (researched.includes(node.id)) return "done" as const;
   if (activeResearchNodeId === node.id) return "active" as const;
-  const available = node.prerequisites.every((item) => researched.includes(item)) && researchPoints >= node.cost;
+  const available = node.prerequisites.every((item: string) => researched.includes(item)) && researchPoints >= node.cost;
   return available ? "available" as const : "locked" as const;
 }
 
+const RESEARCH_TIER_BRANCH_ORDER: Record<number, string[]> = {
+  0: ["Scouting", "Infrastructure", "Industry", "Food"],
+  1: ["Scouting", "Protection", "Food", "Energy", "Industry", "Pest Control"],
+  2: ["Logistics", "Energy", "Industry", "Medicine", "Pest Control", "Protection"],
+  3: ["Energy", "Logistics", "Defense", "Protection", "Pest Control", "Medicine"],
+  4: ["Energy", "Defense", "Medicine", "Logistics"]
+};
+
+function getResearchAncestors(nodeId: string, visited = new Set<string>()) {
+  if (visited.has(nodeId)) return visited;
+  visited.add(nodeId);
+  const node = researchNodeMap[nodeId];
+  if (!node) return visited;
+  node.prerequisites.forEach((prerequisiteId: string) => getResearchAncestors(prerequisiteId, visited));
+  return visited;
+}
+
+function getResearchDescendants(nodeId: string, visited = new Set<string>()) {
+  if (visited.has(nodeId)) return visited;
+  visited.add(nodeId);
+  researchNodes.forEach((node) => {
+    if (node.prerequisites.includes(nodeId)) {
+      getResearchDescendants(node.id, visited);
+    }
+  });
+  return visited;
+}
+
+function getResearchCluster(nodeId: string) {
+  const ancestors = getResearchAncestors(nodeId);
+  const descendants = getResearchDescendants(nodeId);
+  return new Set<string>([...ancestors, ...descendants]);
+}
+
+function getResearchChildren(nodeId: string) {
+  return researchNodes.filter((node) => node.prerequisites.includes(nodeId));
+}
+
+function getResearchUnlockGroups(node: ResearchNode) {
+  const groups = {
+    structures: [] as string[],
+    safeguards: [] as string[],
+    protocols: [] as string[]
+  };
+
+  node.unlocks.forEach((unlock: string) => {
+    const normalized = unlock.toLowerCase();
+    if (normalized.includes("plant") || normalized.includes("array") || normalized.includes("lab") || normalized.includes("workshop") || normalized.includes("station") || normalized.includes("well") || normalized.includes("fields") || normalized.includes("hub") || normalized.includes("vault") || normalized.includes("bay") || normalized.includes("rig")) {
+      groups.structures.push(unlock);
+      return;
+    }
+    if (normalized.includes("seal") || normalized.includes("shield") || normalized.includes("mask") || normalized.includes("filter") || normalized.includes("suit") || normalized.includes("dosimeter") || normalized.includes("cartridge")) {
+      groups.safeguards.push(unlock);
+      return;
+    }
+    groups.protocols.push(unlock);
+  });
+
+  return groups;
+}
+
 function buildResearchTreeLayout() {
-  const branchOrder = [...new Set(researchNodes.map((node) => node.branch))];
   const nodeLayouts: Array<{ id: string; x: number; y: number; width: number; height: number; branch: string; tier: number }> = [];
   const branchLabels: Array<{ key: string; branch: string; tier: number; x: number; y: number; color: string }> = [];
   const nodeMap: Record<string, { id: string; x: number; y: number; width: number; height: number; branch: string; tier: number }> = {};
@@ -294,11 +356,22 @@ function buildResearchTreeLayout() {
 
   [0, 1, 2, 3, 4].forEach((tier) => {
     const tierNodes = researchNodes.filter((node) => node.tier === tier);
-    let cursorY = 56;
+    let cursorY = 44;
     const x = tier === 0 ? RESEARCH_TREE_ROOT_X : RESEARCH_TREE_TIER_X + (tier - 1) * (RESEARCH_TREE_COLUMN_WIDTH + RESEARCH_TREE_COLUMN_GAP);
+    const fallbackBranches = [...new Set(tierNodes.map((node) => node.branch))];
+    const branchOrder = [...(RESEARCH_TIER_BRANCH_ORDER[tier] ?? []), ...fallbackBranches.filter((branch) => !(RESEARCH_TIER_BRANCH_ORDER[tier] ?? []).includes(branch))];
 
     branchOrder.forEach((branch) => {
-      const branchNodes = tierNodes.filter((node) => node.branch === branch);
+      const branchNodes = tierNodes
+        .filter((node) => node.branch === branch)
+        .sort((left, right) => {
+          const leftParents = left.prerequisites.map((id) => nodeMap[id]?.y ?? 0);
+          const rightParents = right.prerequisites.map((id) => nodeMap[id]?.y ?? 0);
+          const leftAnchor = leftParents.length > 0 ? leftParents.reduce((sum, value) => sum + value, 0) / leftParents.length : 0;
+          const rightAnchor = rightParents.length > 0 ? rightParents.reduce((sum, value) => sum + value, 0) / rightParents.length : 0;
+          if (leftAnchor === rightAnchor) return left.cost - right.cost;
+          return leftAnchor - rightAnchor;
+        });
       if (branchNodes.length === 0) return;
 
       branchLabels.push({
@@ -306,7 +379,7 @@ function buildResearchTreeLayout() {
         branch,
         tier,
         x,
-        y: Math.max(22, cursorY - 24),
+        y: Math.max(18, cursorY - 18),
         color: getResearchBranchColor(branch)
       });
 
@@ -331,12 +404,14 @@ function buildResearchTreeLayout() {
 
   const links = researchNodes.flatMap((node) => {
     const target = nodeMap[node.id];
-    if (!target) return [] as Array<{ id: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
+    if (!target) return [] as Array<{ id: string; sourceId: string; targetId: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
     return node.prerequisites.flatMap((prerequisiteId) => {
       const source = nodeMap[prerequisiteId];
-      if (!source) return [] as Array<{ id: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
+      if (!source) return [] as Array<{ id: string; sourceId: string; targetId: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
       return [{
         id: `${prerequisiteId}-${node.id}`,
+        sourceId: prerequisiteId,
+        targetId: node.id,
         x1: source.x + source.width,
         y1: source.y + source.height / 2,
         x2: target.x,
@@ -346,12 +421,11 @@ function buildResearchTreeLayout() {
     });
   });
 
-  const width = RESEARCH_TREE_TIER_X + 4 * (RESEARCH_TREE_COLUMN_WIDTH + RESEARCH_TREE_COLUMN_GAP) + RESEARCH_TREE_NODE_WIDTH + 64;
-  const height = maxY + 32;
+  const width = RESEARCH_TREE_TIER_X + 4 * (RESEARCH_TREE_COLUMN_WIDTH + RESEARCH_TREE_COLUMN_GAP) + RESEARCH_TREE_NODE_WIDTH + 44;
+  const height = maxY + 18;
 
   return { nodeLayouts, nodeMap, links, branchLabels, width, height };
 }
-
 const phaseLabels = {
   dawn: "Dawn",
   day: "Day",
@@ -842,58 +916,118 @@ function DetailsPanel() {
         </>
       ) : null}
 
-      {view === "research" ? (
-        <>
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">Technology</p>
-              <h2>{selectedResearchNode.name}</h2>
+      {view === "research" ? (() => {
+        const selectedResearchState = getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research);
+        const selectedResearchChildren = getResearchChildren(selectedResearchNode.id);
+        const selectedResearchUnlockGroups = getResearchUnlockGroups(selectedResearchNode);
+        const selectedResearchDossierStyle: CSSProperties & Record<"--branch-color", string> = {
+          "--branch-color": getResearchBranchColor(selectedResearchNode.branch)
+        };
+
+        return (
+          <>
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Technology Dossier</p>
+                <h2>{selectedResearchNode.name}</h2>
+              </div>
+              <span className={`status-pill ${selectedResearchState}`}>{selectedResearchState}</span>
             </div>
-            <span className={`status-pill ${getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research)}`}>
-              {getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research)}
-            </span>
-          </div>
-          <p className="panel-copy">{selectedResearchNode.description}</p>
-          <div className="panel-grid">
-            <div><span>Tier</span><strong>{selectedResearchNode.tier}</strong></div>
-            <div><span>Branch</span><strong>{selectedResearchNode.branch}</strong></div>
-            <div><span>Cost</span><strong>{selectedResearchNode.cost}</strong></div>
-            <div><span>Research</span><strong>{resources.research.toFixed(0)}</strong></div>
-          </div>
-          <div className="subsection">
-            <h3>Prerequisites</h3>
-            <div className="flow-tags">
-              {selectedResearchNode.prerequisites.length > 0 ? selectedResearchNode.prerequisites.map((prerequisiteId) => {
-                const prerequisite = researchNodes.find((item) => item.id === prerequisiteId);
-                const ready = researched.includes(prerequisiteId);
-                return <span key={prerequisiteId} className={`flow-tag ${ready ? "positive" : ""}`}>{ready ? "Ready" : "Missing"}: {prerequisite?.name ?? prerequisiteId}</span>;
-              }) : <span className="flow-tag positive">No prerequisites</span>}
-            </div>
-          </div>
-          <div className="subsection">
-            <h3>Unlocks</h3>
-            <div className="flow-tags">{selectedResearchNode.unlocks.map((unlock) => <span key={unlock} className="flow-tag">{unlock}</span>)}</div>
-          </div>
-          <div className="subsection">
-            <h3>Doctrine</h3>
-            <div className="flow-tags">{selectedResearchNode.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>)}</div>
-          </div>
-          <div className="subsection">
-            <h3>Actions</h3>
-            <div className="inline-actions single-action">
-              <button onClick={() => startResearch(selectedResearchNode.id)} disabled={getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) !== "available"}>
-                {getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "done"
-                  ? "Already unlocked"
-                  : getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "active"
-                    ? "Research in progress"
-                    : getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "available"
-                      ? `Start Research (${selectedResearchNode.cost})`
-                      : "Locked"}
-              </button>
-            </div>
-          </div>
-        </>
-      ) : null}
+            <section className="research-dossier" style={selectedResearchDossierStyle}>
+              <div className="research-dossier-hero">
+                <div>
+                  <div className="dossier-kicker-row">
+                    <span className="dossier-branch-pill">{selectedResearchNode.branch}</span>
+                    <span className="dossier-tier-pill">Tier {selectedResearchNode.tier}</span>
+                  </div>
+                  <p>{selectedResearchNode.description}</p>
+                </div>
+                <div className="dossier-stat-grid">
+                  <div><span>Research Cost</span><strong>{selectedResearchNode.cost}</strong></div>
+                  <div><span>Stock Available</span><strong>{resources.research.toFixed(0)}</strong></div>
+                  <div><span>Prerequisites</span><strong>{selectedResearchNode.prerequisites.length}</strong></div>
+                  <div><span>Follow-ups</span><strong>{selectedResearchChildren.length}</strong></div>
+                </div>
+              </div>
+
+              <div className="dossier-route-grid">
+                <div className="route-block">
+                  <h3>Feeds From</h3>
+                  <div className="flow-tags">
+                    {selectedResearchNode.prerequisites.length > 0 ? selectedResearchNode.prerequisites.map((prerequisiteId) => {
+                      const prerequisite = researchNodeMap[prerequisiteId];
+                      const ready = researched.includes(prerequisiteId);
+                      return <span key={prerequisiteId} className={`flow-tag ${ready ? "positive" : ""}`}>{ready ? "Ready" : "Missing"}: {prerequisite?.name ?? prerequisiteId}</span>;
+                    }) : <span className="flow-tag positive">No prerequisites</span>}
+                  </div>
+                </div>
+                <div className="route-block current">
+                  <h3>Current Node</h3>
+                  <div className="flow-tags">
+                    <span className="flow-tag doctrine">{selectedResearchNode.branch}</span>
+                    <span className="flow-tag">Tier {selectedResearchNode.tier}</span>
+                    <span className="flow-tag">{selectedResearchState}</span>
+                  </div>
+                </div>
+                <div className="route-block">
+                  <h3>Leads To</h3>
+                  <div className="flow-tags">
+                    {selectedResearchChildren.length > 0 ? selectedResearchChildren.map((child) => (
+                      <span key={child.id} className="flow-tag">{child.name}</span>
+                    )) : <span className="flow-tag">No downstream projects</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="subsection">
+                <h3>Unlock Portfolio</h3>
+                <div className="dossier-unlock-groups">
+                  <div className="unlock-group-card">
+                    <span>Structures</span>
+                    <div className="flow-tags">
+                      {selectedResearchUnlockGroups.structures.length > 0 ? selectedResearchUnlockGroups.structures.map((unlock) => <span key={unlock} className="flow-tag">{unlock}</span>) : <span className="flow-tag">No structures</span>}
+                    </div>
+                  </div>
+                  <div className="unlock-group-card">
+                    <span>Safeguards</span>
+                    <div className="flow-tags">
+                      {selectedResearchUnlockGroups.safeguards.length > 0 ? selectedResearchUnlockGroups.safeguards.map((unlock) => <span key={unlock} className="flow-tag positive">{unlock}</span>) : <span className="flow-tag">No safeguards</span>}
+                    </div>
+                  </div>
+                  <div className="unlock-group-card">
+                    <span>Protocols</span>
+                    <div className="flow-tags">
+                      {selectedResearchUnlockGroups.protocols.length > 0 ? selectedResearchUnlockGroups.protocols.map((unlock) => <span key={unlock} className="flow-tag doctrine">{unlock}</span>) : <span className="flow-tag">No protocols</span>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="subsection">
+                <h3>Doctrine Fingerprint</h3>
+                <div className="flow-tags">
+                  {selectedResearchNode.doctrineTags.length > 0 ? selectedResearchNode.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>) : <span className="flow-tag">Generalist</span>}
+                </div>
+              </div>
+
+              <div className="subsection">
+                <h3>Actions</h3>
+                <div className="inline-actions single-action">
+                  <button onClick={() => startResearch(selectedResearchNode.id)} disabled={selectedResearchState !== "available"}>
+                    {selectedResearchState === "done"
+                      ? "Already unlocked"
+                      : selectedResearchState === "active"
+                        ? "Research in progress"
+                        : selectedResearchState === "available"
+                          ? `Start Research (${selectedResearchNode.cost})`
+                          : "Locked"}
+                  </button>
+                </div>
+              </div>
+            </section>
+          </>
+        );
+      })() : null}
     </aside>
   );
 }
@@ -905,7 +1039,8 @@ function ResearchCanvas() {
   const selectResearch = useGameStore((state) => state.selectResearch);
   const resources = useGameStore((state) => state.resources);
   const treeLayout = useMemo(() => buildResearchTreeLayout(), []);
-  const selectedNode = researchNodes.find((node) => node.id === selectedResearchId) ?? researchNodes[0];
+  const selectedNode = (selectedResearchId ? researchNodeMap[selectedResearchId] : undefined) ?? researchNodes[0];
+  const selectedCluster = getResearchCluster(selectedNode.id);
   const tierDescriptors = [
     { tier: 0, label: 'Roots', className: 'root' },
     { tier: 1, label: 'Tier 1', className: '' },
@@ -928,7 +1063,7 @@ function ResearchCanvas() {
           </div>
           <div className="status-tile wide">
             <span>Focus</span>
-            <strong>{activeResearch ? researchNodes.find((node) => node.id === activeResearch.nodeId)?.name ?? activeResearch.nodeId : 'No active project'}</strong>
+            <strong>{activeResearch ? researchNodeMap[activeResearch.nodeId]?.name ?? activeResearch.nodeId : "No active project"}</strong>
           </div>
         </div>
       </div>
@@ -944,28 +1079,38 @@ function ResearchCanvas() {
           <svg className="research-links" viewBox={`0 0 ${treeLayout.width} ${treeLayout.height}`} preserveAspectRatio="xMinYMin meet">
             {treeLayout.links.map((link) => {
               const midX = (link.x1 + link.x2) / 2;
+              const isSelectedPath = selectedCluster.has(link.sourceId) && selectedCluster.has(link.targetId);
               return (
                 <path
                   key={link.id}
                   d={`M ${link.x1} ${link.y1} C ${midX} ${link.y1}, ${midX} ${link.y2}, ${link.x2} ${link.y2}`}
-                  style={{ stroke: link.color }}
+                  style={{
+                    stroke: link.color,
+                    opacity: isSelectedPath ? 0.92 : 0.2,
+                    strokeWidth: isSelectedPath ? 2.8 : 1.3
+                  }}
                 />
               );
             })}
           </svg>
-          {treeLayout.branchLabels.map((label) => (
-            <div
-              key={label.key}
-              className="research-branch-label"
-              style={{ left: `${label.x}px`, top: `${label.y}px`, borderColor: label.color, color: label.color }}
-            >
-              {label.branch}
-            </div>
-          ))}
+          {treeLayout.branchLabels.map((label) => {
+            const branchHasSelection = Array.from(selectedCluster).some((nodeId) => researchNodeMap[nodeId]?.branch === label.branch && researchNodeMap[nodeId]?.tier === label.tier);
+            return (
+              <div
+                key={label.key}
+                className={["research-branch-label", branchHasSelection ? "active" : ""].filter(Boolean).join(" ")}
+                style={{ left: `${label.x}px`, top: `${label.y}px`, borderColor: label.color, color: label.color }}
+              >
+                {label.branch}
+              </div>
+            );
+          })}
           {treeLayout.nodeLayouts.map((layout) => {
-            const node = researchNodes.find((item) => item.id === layout.id);
+            const node = researchNodeMap[layout.id];
             if (!node) return null;
             const state = getResearchNodeState(node.id, researched, activeResearch?.nodeId, resources.research);
+            const isSelected = selectedNode.id === node.id;
+            const isRelated = selectedCluster.has(node.id);
             const nodeStyle: CSSProperties & Record<"--branch-color", string> = {
               left: `${layout.x}px`,
               top: `${layout.y}px`,
@@ -976,7 +1121,7 @@ function ResearchCanvas() {
             return (
               <button
                 key={node.id}
-                className={["tree-node", state, selectedNode.id === node.id ? "selected" : ""].filter(Boolean).join(" ")}
+                className={["tree-node", state, isSelected ? "selected" : "", !isSelected && isRelated ? "related" : "", !isRelated ? "dimmed" : ""].filter(Boolean).join(" ")}
                 style={nodeStyle}
                 onClick={() => selectResearch(node.id)}
               >

@@ -63,3 +63,13 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Generated additional tile variants for every biome plus new city-core/reactor visuals and integrated them into the asset mappings under public/world-hex and public/city.
 - Latest verification for this visual/tree pass: `npm test`, `npm run build`, and browser screenshots for world, research, and city views in `output/web-game/ui-pass-world.png`, `output/web-game/ui-pass-research.png`, and `output/web-game/ui-pass-city.png`.
 - Suggested next step: refine the tech tree layout spacing/branch balancing a little further, then move into a deeper HUD/detail-panel polish pass now that the main visual architecture is in place.
+- Follow-up polish pass after the visual save point: compacted the research tree geometry with smaller tier columns, smaller node cards, reduced gaps, and a tighter overall canopy footprint.
+- Rebalanced the atmospheric UI shell around the tree pass by refining the HUD, time rail, detail panels, operations panel, and bottom bar with stronger material depth and more consistent control-room styling.
+- Kept the tech tree structure the same, but improved its information density so tier progression is easier to scan without oversized cards dominating the screen.
+- Latest verification for this follow-up pass: `npm test`, `npm run build`, and browser QA with an updated research screenshot in `output/web-game/ui-pass-research-polish.png`.
+
+## 2026-03-29 - Research dossier and pathway pass
+- Reordered research tree layout by tier-specific branch priority and parent-anchor sorting so cross-column links read more like a directed canopy instead of a loose grid.
+- Added selected-path highlighting in the research tree: related nodes stay emphasized, unrelated nodes dim down, and branch labels react to the active chain.
+- Rebuilt the research inspector into a richer dossier with branch/tier hero pills, stat blocks, feeds-from/current/leads-to route panels, grouped unlock portfolio, and doctrine fingerprint sections.
+- Verified with `npm run build`, `npm test`, Playwright browser QA, and screenshot `output/web-game/ui-pass-research-dossier.png`.

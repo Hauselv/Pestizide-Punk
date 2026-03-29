@@ -1561,3 +1561,456 @@ button {
     padding: 0.65rem;
   }
 }
+
+/* Atmosphere pass: tree spacing + HUD/panel refinement */
+.hud {
+  position: relative;
+  overflow: hidden;
+  grid-template-columns: 300px 1fr 300px;
+  gap: 1.1rem;
+  padding: 1.15rem 1.4rem 1.05rem;
+  background:
+    linear-gradient(180deg, rgba(25, 27, 23, 0.97), rgba(15, 17, 14, 0.94)),
+    radial-gradient(circle at top left, rgba(222, 165, 88, 0.12), transparent 22%),
+    radial-gradient(circle at top right, rgba(99, 160, 115, 0.08), transparent 24%);
+  box-shadow: inset 0 -1px 0 rgba(255, 220, 160, 0.08), 0 16px 34px rgba(0, 0, 0, 0.28);
+}
+
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(255, 220, 164, 0.035), transparent 22%, transparent 78%, rgba(111, 172, 120, 0.035));
+  pointer-events: none;
+}
+
+.brand {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 0.2rem;
+  padding: 0.55rem 0.3rem 0.55rem 0.1rem;
+}
+
+.brand h1 {
+  font-size: 2.05rem;
+  line-height: 0.92;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.32);
+}
+
+.resource-grid {
+  position: relative;
+  z-index: 1;
+  gap: 0.62rem;
+}
+
+.resource-chip {
+  position: relative;
+  padding: 0.68rem 0.82rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(52, 51, 42, 0.88), rgba(21, 23, 19, 0.94));
+  border-color: rgba(233, 196, 118, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 235, 196, 0.06), 0 8px 18px rgba(0, 0, 0, 0.16);
+}
+
+.resource-chip strong {
+  margin-left: auto;
+  font-size: 0.96rem;
+  color: #fff0cc;
+}
+
+.population-summary {
+  position: relative;
+  z-index: 1;
+  gap: 0.55rem;
+  padding: 0.9rem;
+  background: linear-gradient(180deg, rgba(49, 47, 39, 0.9), rgba(19, 21, 18, 0.95));
+  border-color: rgba(231, 199, 129, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 236, 194, 0.06), 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.population-summary strong {
+  margin-top: 0.28rem;
+  display: block;
+  color: #f5e7c7;
+}
+
+.time-rail {
+  align-items: stretch;
+  gap: 1.05rem;
+  padding-top: 0.95rem;
+}
+
+.time-rail-copy,
+.timeline-shell {
+  background:
+    linear-gradient(180deg, rgba(43, 42, 34, 0.94), rgba(19, 21, 18, 0.96)),
+    radial-gradient(circle at top left, rgba(255, 201, 112, 0.08), transparent 28%);
+  border-color: rgba(234, 198, 120, 0.16);
+}
+
+.timeline-shell {
+  box-shadow: inset 0 1px 0 rgba(255, 228, 181, 0.07), 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.main-layout {
+  gap: 1.15rem;
+  padding-top: 1.1rem;
+}
+
+.view-tabs {
+  padding: 0.25rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(48, 46, 39, 0.88), rgba(20, 22, 18, 0.92));
+  border: 1px solid rgba(231, 198, 121, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 227, 175, 0.06);
+}
+
+.view-tabs button,
+.ghost-button,
+.control-group button {
+  box-shadow: inset 0 1px 0 rgba(255, 232, 190, 0.05), 0 6px 14px rgba(0, 0, 0, 0.14);
+}
+
+.canvas-card,
+.tutorial-panel,
+.detail-panel {
+  background:
+    linear-gradient(180deg, rgba(40, 40, 33, 0.95), rgba(19, 21, 18, 0.97)),
+    radial-gradient(circle at top left, rgba(255, 196, 102, 0.05), transparent 24%);
+  border-color: rgba(232, 197, 118, 0.14);
+}
+
+.detail-panel,
+.tutorial-panel {
+  padding: 1.1rem 1.1rem 1.2rem;
+}
+
+.panel-header {
+  margin-bottom: 1rem;
+  padding-bottom: 0.9rem;
+  border-bottom: 1px solid rgba(255, 223, 163, 0.08);
+}
+
+.panel-copy {
+  color: #d8cfbb;
+  line-height: 1.62;
+}
+
+.panel-grid > div,
+.card-emphasis,
+.muted-box,
+.meta-row,
+.mini-panel,
+.building-hero {
+  background: linear-gradient(180deg, rgba(52, 50, 42, 0.74), rgba(23, 25, 21, 0.78));
+  border-color: rgba(236, 205, 142, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 232, 190, 0.04);
+}
+
+.subsection {
+  gap: 0.75rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(49, 48, 40, 0.38), rgba(18, 20, 17, 0.28));
+  border: 1px solid rgba(236, 205, 142, 0.08);
+}
+
+.build-option,
+.action-stack button,
+.inline-actions button {
+  background: linear-gradient(180deg, rgba(56, 53, 44, 0.92), rgba(24, 26, 21, 0.96));
+  border-color: rgba(231, 193, 113, 0.16);
+}
+
+.flow-tag {
+  background: linear-gradient(180deg, rgba(58, 55, 46, 0.78), rgba(24, 26, 22, 0.82));
+  border-color: rgba(236, 205, 141, 0.14);
+}
+
+.world-toolbar {
+  gap: 0.7rem;
+}
+
+.world-legend {
+  background: linear-gradient(180deg, rgba(16, 18, 18, 0.78), rgba(8, 10, 10, 0.86));
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.research-panel-header {
+  margin-bottom: 0.85rem;
+}
+
+.research-status-cluster {
+  gap: 0.55rem;
+}
+
+.status-tile {
+  min-width: 7.75rem;
+  padding: 0.62rem 0.78rem;
+}
+
+.status-tile.wide {
+  min-width: 13rem;
+}
+
+.research-tree-shell {
+  padding: 0.65rem 0.65rem 0.85rem;
+  border-radius: 22px;
+}
+
+.research-tier-row {
+  grid-template-columns: 162px repeat(4, 216px);
+  gap: 26px;
+  margin-bottom: 0.65rem;
+  padding-left: 26px;
+}
+
+.research-tier-chip {
+  padding: 0.56rem 0.72rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+}
+
+.research-tree-stage {
+  min-height: 35rem;
+}
+
+.research-branch-label {
+  padding: 0.15rem 0.46rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  opacity: 0.9;
+}
+
+.tree-node {
+  gap: 0.26rem;
+  padding: 0.62rem 0.72rem 0.68rem;
+  border-radius: 15px;
+}
+
+.tree-node strong {
+  font-size: 0.9rem;
+  line-height: 1.12;
+}
+
+.tree-node small {
+  font-size: 0.71rem;
+  line-height: 1.3;
+}
+
+.tree-node-topline {
+  font-size: 0.62rem;
+}
+
+.tree-node-meta {
+  font-size: 0.66rem;
+}
+
+.bottom-bar {
+  align-items: stretch;
+  grid-template-columns: minmax(270px, auto) repeat(5, minmax(0, 1fr));
+  gap: 0.8rem;
+  padding: 1rem 1.4rem 1.2rem;
+  background: linear-gradient(180deg, rgba(17, 19, 16, 0), rgba(17, 19, 16, 0.78) 16%, rgba(12, 14, 12, 0.92));
+}
+
+.control-group {
+  padding: 0.65rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(49, 47, 40, 0.82), rgba(19, 21, 18, 0.9));
+  border: 1px solid rgba(231, 195, 119, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 233, 189, 0.05);
+}
+
+.status-block {
+  display: grid;
+  align-content: center;
+  min-height: 4.35rem;
+  padding: 0.8rem 0.95rem;
+  background: linear-gradient(180deg, rgba(46, 45, 38, 0.84), rgba(18, 20, 17, 0.9));
+  border-color: rgba(231, 197, 120, 0.12);
+}
+
+.status-block strong {
+  line-height: 1.32;
+}
+
+.status-block.wide strong {
+  font-size: 0.86rem;
+}
+
+.alert-card {
+  background: linear-gradient(180deg, rgba(47, 46, 39, 0.86), rgba(18, 20, 17, 0.92));
+}
+
+@media (max-width: 1200px) {
+  .hud {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .research-tier-row {
+    grid-template-columns: 162px repeat(4, 216px);
+  }
+}
+
+@media (max-width: 720px) {
+  .brand h1 {
+    font-size: 1.68rem;
+  }
+
+  .resource-chip {
+    padding: 0.62rem 0.72rem;
+  }
+
+  .detail-panel,
+  .tutorial-panel,
+  .canvas-card {
+    padding: 0.92rem;
+  }
+
+  .research-tier-row {
+    gap: 18px;
+  }
+}
+.research-dossier {
+  --branch-color: #d9b474;
+  display: grid;
+  gap: 0.95rem;
+}
+
+.research-dossier-hero {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1rem 1rem 1.05rem;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--branch-color) 16%, rgba(57, 53, 43, 0.92)), rgba(18, 20, 17, 0.96)),
+    radial-gradient(circle at top right, color-mix(in srgb, var(--branch-color) 22%, transparent), transparent 58%);
+  border: 1px solid color-mix(in srgb, var(--branch-color) 36%, rgba(232, 197, 118, 0.18));
+  box-shadow: inset 0 1px 0 rgba(255, 236, 192, 0.06), 0 16px 30px rgba(0, 0, 0, 0.18);
+}
+
+.research-dossier-hero p {
+  margin: 0;
+  color: #ddd3bc;
+  line-height: 1.65;
+}
+
+.dossier-kicker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.8rem;
+}
+
+.dossier-branch-pill,
+.dossier-tier-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.32rem 0.62rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dossier-branch-pill {
+  background: color-mix(in srgb, var(--branch-color) 20%, rgba(26, 29, 24, 0.92));
+  border: 1px solid color-mix(in srgb, var(--branch-color) 44%, rgba(235, 206, 145, 0.16));
+  color: #fff0c8;
+}
+
+.dossier-tier-pill {
+  background: rgba(17, 20, 17, 0.68);
+  border: 1px solid rgba(234, 203, 143, 0.14);
+  color: #d4cab0;
+}
+
+.dossier-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.72rem;
+}
+
+.dossier-stat-grid > div,
+.route-block,
+.unlock-group-card {
+  padding: 0.8rem 0.85rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(54, 51, 42, 0.7), rgba(21, 24, 19, 0.84));
+  border: 1px solid rgba(236, 205, 142, 0.11);
+}
+
+.dossier-stat-grid span,
+.unlock-group-card > span,
+.route-block h3 {
+  display: block;
+  margin: 0;
+  color: #baaf95;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.dossier-stat-grid strong {
+  display: block;
+  margin-top: 0.34rem;
+  color: #fbf4de;
+  font-size: 1.02rem;
+}
+
+.dossier-route-grid,
+.dossier-unlock-groups {
+  display: grid;
+  gap: 0.78rem;
+}
+
+.route-block.current {
+  border-color: color-mix(in srgb, var(--branch-color) 42%, rgba(232, 197, 118, 0.18));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--branch-color) 20%, transparent);
+}
+
+.route-block h3 {
+  margin-bottom: 0.72rem;
+}
+
+.unlock-group-card {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.tree-node.related {
+  opacity: 0.98;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.22), 0 0 0 1px color-mix(in srgb, var(--branch-color) 18%, transparent);
+}
+
+.tree-node.dimmed {
+  opacity: 0.46;
+  filter: saturate(0.82);
+}
+
+.research-branch-label.active {
+  opacity: 1;
+  box-shadow: 0 0 0 1px color-mix(in srgb, currentColor 28%, transparent), 0 10px 18px rgba(0, 0, 0, 0.18);
+  background: linear-gradient(180deg, rgba(17, 19, 16, 0.92), rgba(14, 16, 14, 0.82));
+}
+
+@media (min-width: 1100px) {
+  .research-dossier-hero,
+  .dossier-route-grid,
+  .dossier-unlock-groups {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  }
+
+  .dossier-route-grid > .route-block:last-child,
+  .dossier-unlock-groups > .unlock-group-card:last-child {
+    grid-column: span 2;
+  }
+}
