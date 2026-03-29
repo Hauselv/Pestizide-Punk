@@ -9,6 +9,7 @@ import { useGameStore } from "../game/state/store";
 import type {
   BuildingDefinition,
   BuildingInstance,
+  DoctrineTag,
   Expedition,
   ExpeditionKind,
   HexCoord,
@@ -100,6 +101,43 @@ function formatFlow(flow?: ResourceFlow, level = 1, asCost = false) {
 function formatProtection(protection: Record<ProtectionSlotId, number>) {
   return Object.entries(protection)
     .map(([slot, value]) => `${slot} ${Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1)}`)
+    .join(" / ");
+}
+
+function createDoctrineProfile(): Record<DoctrineTag, number> {
+  return {
+    clean: 0,
+    fossil: 0,
+    bio: 0,
+    synthetic: 0,
+    chemical: 0,
+    radical: 0,
+    engineered: 0,
+    storage: 0,
+    resilient: 0
+  };
+}
+
+function getDoctrineProfile(buildings: BuildingInstance[]) {
+  const profile = createDoctrineProfile();
+  buildings.forEach((building) => {
+    if (!building.enabled) return;
+    const definition = buildingMap[building.buildingId];
+    const effective = getEffectiveBuildingData(definition, building);
+    const weight = buildingMultiplier(building.level);
+    effective.doctrineTags.forEach((tag) => {
+      profile[tag] += weight;
+    });
+  });
+  return profile;
+}
+
+function summarizeDoctrineProfile(profile: Record<DoctrineTag, number>) {
+  return Object.entries(profile)
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 4)
+    .map(([tag, value]) => `${tag} ${Number(value).toFixed(value % 1 === 0 ? 0 : 1)}`)
     .join(" / ");
 }
 
@@ -690,6 +728,10 @@ function OperationsPanel() {
   const population = useGameStore((state) => state.population);
   const pollution = useGameStore((state) => state.pollution);
   const freeRoles = getFreeRoles(buildings, expeditions, population.roles);
+  const doctrineProfile = getDoctrineProfile(buildings);
+  const doctrineSummary = summarizeDoctrineProfile(doctrineProfile) || "no doctrine mix yet";
+  const technicalLoad = doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil + doctrineProfile.radical;
+  const staffingRisk = freeRoles.technicians <= 1 && technicalLoad >= 3 ? "overstretched" : freeRoles.technicians <= 3 || freeRoles.workers <= 4 ? "tight" : "stable";
 
   return (
     <section className="tutorial-panel">
@@ -705,15 +747,23 @@ function OperationsPanel() {
         <strong>{formatProtection(population.protection)}</strong>
       </div>
       <div className="mini-panel wide-panel">
+        <span>Doctrine Mix</span>
+        <strong>{doctrineSummary}</strong>
+      </div>
+      <div className="mini-panel wide-panel">
+        <span>Staffing Risk</span>
+        <strong>{staffingRisk}</strong>
+      </div>
+      <div className="mini-panel wide-panel">
         <span>Doctrine Pressure</span>
         <strong>{pollution < 20 ? "stable" : pollution < 40 ? "strained" : "hazardous"}</strong>
       </div>
       <ol className="flat-list ordered">
-        <li>Use clean power and storage for stability, or fossil plants for sharp industrial tempo.</li>
-        <li>Pair bio fertilizer and resilient food chains when pollution starts to snowball.</li>
-        <li>Use radical pest control only when immediate suppression is worth the fallout.</li>
-        <li>Protection tiers now matter alongside gear; watch respiratory, chemical, radiation, and environmental coverage.</li>
-        <li>Pollution is a real city pressure now, not just a flavor note.</li>
+        <li>Clean, storage, and resilient doctrines now soften toxic storm shock and contamination spikes.</li>
+        <li>Bio and chemical doctrine stacks improve swarm response before you even field heavy towers.</li>
+        <li>Synthetic, fossil, and radical stacks now raise contamination-surge fallout if you neglect buffers.</li>
+        <li>If technical staffing falls behind an aggressive doctrine mix, stability starts to slip under load.</li>
+        <li>Protection tiers still matter alongside gear; doctrine is support, not a replacement for hazard prep.</li>
       </ol>
     </section>
   );
@@ -752,6 +802,7 @@ export function App() {
     </div>
   );
 }
+
 
 
 

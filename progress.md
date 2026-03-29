@@ -36,3 +36,10 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Added simulation coverage for doctrine specialization plus a pollution regression check in tests/simulation/store.test.ts.
 - Latest checks for this pass: npm test, npm run build, and a headless browser QA screenshot for the Cargo Spine scrap foundry doctrine flow in output/web-game/doctrine-city/shot-0.png.
 - Next suggested step: make doctrine choices affect staffing and event interactions, or add building families with mutually exclusive tier-3 follow-ups instead of only one post-upgrade lock-in.
+- Committed the doctrine upgrade milestone as `Add doctrine building upgrade paths` before continuing work.
+- Doctrine systems now feed back into simulation pressure instead of only modifying per-building yields.
+- Added doctrine-profile aggregation in the store so clean/storage/resilient stacks help with toxic storms and contamination, while fossil/synthetic/radical stacks intensify surge fallout.
+- Added staffing-pressure simulation so aggressive doctrine mixes can start eroding stability when technical support falls behind.
+- Operations Board now exposes doctrine mix and staffing risk, making the current city philosophy readable without opening each slot.
+- Latest verification after this pass: npm test, npm run build, and browser screenshot review in output/web-game/doctrine-pressure/shot-0.png. The text-state probe underreported some visible labels, but the screenshot itself confirms the UI is present.
+- Next suggested step: connect doctrine pressure into building staffing assignment or add mutually exclusive tier-3 doctrine evolutions for a few cornerstone buildings.

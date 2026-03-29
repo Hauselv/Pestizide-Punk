@@ -9,6 +9,7 @@ import type {
   AlertMessage,
   BuildingDefinition,
   BuildingInstance,
+  DoctrineTag,
   Expedition,
   ExpeditionKind,
   HazardId,
@@ -133,6 +134,41 @@ function getEffectiveBuildingData(definition: BuildingDefinition, instance: Buil
     doctrineTags,
     upgradeOption
   };
+}
+
+function createDoctrineProfile(): Record<DoctrineTag, number> {
+  return {
+    clean: 0,
+    fossil: 0,
+    bio: 0,
+    synthetic: 0,
+    chemical: 0,
+    radical: 0,
+    engineered: 0,
+    storage: 0,
+    resilient: 0
+  };
+}
+
+function getDoctrineProfile(state: SnapshotState) {
+  const profile = createDoctrineProfile();
+  state.buildings.forEach((instance) => {
+    if (!instance.enabled) return;
+    const definition = buildingMap[instance.buildingId];
+    const effective = getEffectiveBuildingData(definition, instance);
+    const weight = getBuildingMultiplier(instance.level);
+    effective.doctrineTags.forEach((tag) => {
+      profile[tag] += weight;
+    });
+  });
+  return profile;
+}
+
+function getStaffingPressure(state: SnapshotState, doctrineProfile = getDoctrineProfile(state)) {
+  const freeRoles = getFreeRoles(state);
+  const industrialLoad = doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil + doctrineProfile.radical;
+  const supportCapacity = freeRoles.technicians + freeRoles.researchers * 0.5 + freeRoles.workers * 0.35;
+  return Math.max(0, industrialLoad - supportCapacity);
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -402,7 +438,10 @@ function tickState(state: SnapshotState, seconds: number) {
   state.elapsedSeconds += dt;
   const activeEvent = state.activeEvent;
   const mitigation = getCityMitigation(state);
-  const storageScore = state.buildings.filter((instance) => instance.enabled && buildingMap[instance.buildingId].doctrineTags?.includes("storage")).reduce((sum, instance) => sum + instance.level, 0);
+  const doctrineProfile = getDoctrineProfile(state);
+  const staffingPressure = getStaffingPressure(state, doctrineProfile);
+  const freeRoles = getFreeRoles(state);
+  const storageScore = state.buildings.filter((instance) => instance.enabled && getEffectiveBuildingData(buildingMap[instance.buildingId], instance).doctrineTags.includes("storage")).reduce((sum, instance) => sum + instance.level, 0);
 
   const baseDelta: Record<ResourceId, number> = {
     power: 0.55,
@@ -456,22 +495,26 @@ function tickState(state: SnapshotState, seconds: number) {
   });
 
   if (activeEvent?.id === "toxic-storm") {
-    baseDelta.power -= Math.max(0.08, 0.35 - storageScore * 0.08);
-    state.population.contamination += Math.max(0.05, 0.12 - mitigation.toxicity * 0.03) * dt;
+    const stormBuffer = storageScore * 0.08 + doctrineProfile.clean * 0.015 + doctrineProfile.storage * 0.04 + doctrineProfile.resilient * 0.02;
+    baseDelta.power -= Math.max(0.05, 0.35 - stormBuffer);
+    state.population.contamination += Math.max(0.03, 0.12 - mitigation.toxicity * 0.03 - doctrineProfile.clean * 0.006 - doctrineProfile.resilient * 0.006) * dt;
   }
 
   if (activeEvent?.id === "swarm-raid") {
     const towerScore = state.buildings.filter((instance) => instance.enabled && ["spray-tower", "fumigation-tower"].includes(instance.buildingId)).reduce((sum, instance) => sum + instance.level, 0);
-    if (towerScore === 0) {
-      baseDelta.food -= 0.22;
-      state.population.stability -= 0.12 * dt;
+    const pestResponse = towerScore * 0.7 + doctrineProfile.bio * 0.35 + doctrineProfile.chemical * 0.4 + doctrineProfile.radical * 0.2;
+    const foodPenalty = Math.max(0, 0.22 - pestResponse * 0.035);
+    const stabilityPenalty = Math.max(0, 0.12 - pestResponse * 0.02);
+    if (foodPenalty > 0) {
+      baseDelta.food -= foodPenalty;
+      state.population.stability -= stabilityPenalty * dt;
     }
   }
 
   if (activeEvent?.id === "contamination-surge") {
     baseDelta.water -= 0.2;
-    pollutionDelta += 0.16;
-    state.population.contamination += Math.max(0.04, 0.1 - mitigation.spores * 0.02) * dt;
+    pollutionDelta += Math.max(0.04, 0.16 + doctrineProfile.synthetic * 0.015 + doctrineProfile.fossil * 0.02 - doctrineProfile.clean * 0.012 - doctrineProfile.bio * 0.01);
+    state.population.contamination += Math.max(0.02, 0.1 - mitigation.spores * 0.02 - doctrineProfile.clean * 0.008 - doctrineProfile.resilient * 0.008 + doctrineProfile.radical * 0.004) * dt;
   }
 
   (Object.keys(baseDelta) as ResourceId[]).forEach((resourceId) => {
@@ -495,6 +538,14 @@ function tickState(state: SnapshotState, seconds: number) {
 
   const clinicScore = state.buildings.filter((instance) => instance.enabled && instance.buildingId === "clinic").reduce((sum, instance) => sum + instance.level, 0);
   state.population.contamination -= clinicScore * 0.08 * dt;
+
+  if (staffingPressure > 0) {
+    state.population.stability -= staffingPressure * 0.025 * dt;
+    pollutionDelta += staffingPressure * 0.01;
+  }
+  if (freeRoles.technicians <= 1 && doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil >= 3) {
+    state.population.stability -= 0.04 * dt;
+  }
 
   if (state.pollution > 20) {
     state.population.contamination += Math.max(0, state.pollution - 20) * 0.006 * dt;
@@ -596,6 +647,9 @@ function tickState(state: SnapshotState, seconds: number) {
   }
   if (state.pollution >= 35) {
     state.alerts = appendAlert(state.alerts, { id: "high-pollution", tone: "danger", text: "City pollution is amplifying contamination and unrest." });
+  }
+  if (staffingPressure >= 1.5) {
+    state.alerts = appendAlert(state.alerts, { id: "staffing-strain", tone: "warning", text: "Doctrine load is outpacing technical staffing." });
   }
 }
 
@@ -886,8 +940,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
         contamination: state.population.contamination,
         stability: state.population.stability,
         protection: state.population.protection,
-        freeRoles: getFreeRoles(state)
+        freeRoles: getFreeRoles(state),
+        staffingPressure: getStaffingPressure(state)
       },
+      doctrineProfile: getDoctrineProfile(state),
       buildings: state.buildings.map((building) => ({
         slotId: building.slotId,
         buildingId: building.buildingId,
@@ -907,6 +963,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   }
 }));
+
+
 
 
 

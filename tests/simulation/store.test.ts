@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { worldHexes } from "../../src/game/data/worldHexes";
 import { useGameStore } from "../../src/game/state/store";
+import { worldHexes } from "../../src/game/data/worldHexes";
 
 beforeEach(() => {
   useGameStore.getState().resetGame();
@@ -60,5 +60,28 @@ describe("Pestizide Punk store", () => {
     const beforePollution = useGameStore.getState().pollution;
     state.advanceTime(10000);
     expect(useGameStore.getState().pollution).toBeGreaterThan(beforePollution);
+  });
+
+  it("makes contamination surges harsher under radical doctrine load", () => {
+    const radicalState = useGameStore.getState();
+    radicalState.upgradeBuilding("west");
+    radicalState.chooseBuildingUpgrade("west", "throughput-smelter");
+    useGameStore.setState((state) => ({
+      ...state,
+      activeEvent: { id: "contamination-surge", title: "Contamination Surge", description: "", remaining: 12 }
+    }));
+    radicalState.advanceTime(10000);
+    const radicalPollution = useGameStore.getState().pollution;
+
+    useGameStore.getState().resetGame();
+    const baselineState = useGameStore.getState();
+    useGameStore.setState((state) => ({
+      ...state,
+      activeEvent: { id: "contamination-surge", title: "Contamination Surge", description: "", remaining: 12 }
+    }));
+    baselineState.advanceTime(10000);
+    const baselinePollution = useGameStore.getState().pollution;
+
+    expect(radicalPollution).toBeGreaterThan(baselinePollution);
   });
 });
