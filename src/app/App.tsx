@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { buildingDefinitions, districtSlots } from "../game/data/buildings";
 import { resourceDefinitions } from "../game/data/resources";
 import { researchNodes } from "../game/data/research";
 import { regionDefinitions } from "../game/data/sectors";
 import { terrainAssetMap } from "../game/data/terrainAssets";
+import { buildingVisualMap, cityVisual } from "../game/data/buildingVisuals";
 import { worldHexes } from "../game/data/worldHexes";
 import { useGameStore } from "../game/state/store";
 import type {
@@ -27,6 +28,19 @@ import type {
 const buildingMap = Object.fromEntries(buildingDefinitions.map((definition) => [definition.id, definition])) as Record<string, BuildingDefinition>;
 const regionMap = Object.fromEntries(regionDefinitions.map((definition) => [definition.id, definition]));
 
+function getBuildingVisual(buildingId: string, fallbackLabel: string) {
+  return buildingVisualMap[buildingId] ?? {
+    icon: "/buildings/icons/utility-works.png",
+    label: fallbackLabel,
+    tint: "rgba(145, 159, 166, 0.2)"
+  };
+}
+
+function getTerrainVariantImage(terrainType: TerrainType, decorVariant = 0) {
+  const terrain = terrainAssetMap[terrainType];
+  return terrain.variants[decorVariant % terrain.variants.length] ?? terrain.variants[0];
+}
+
 const regionStateLabel: Record<RegionStateId, string> = {
   known: "Known",
   surveying: "Surveying",
@@ -41,6 +55,26 @@ const HEX_SIZE = 41;
 const HEX_WIDTH = Math.sqrt(3) * HEX_SIZE;
 const WORLD_PADDING = HEX_SIZE * 2.6;
 const TERRAIN_TYPES = [...new Set(worldHexes.map((tile) => tile.terrainType))] as TerrainType[];
+const RESEARCH_TREE_ROOT_X = 34;
+const RESEARCH_TREE_TIER_X = 280;
+const RESEARCH_TREE_COLUMN_WIDTH = 248;
+const RESEARCH_TREE_COLUMN_GAP = 42;
+const RESEARCH_TREE_NODE_WIDTH = 216;
+const RESEARCH_TREE_NODE_HEIGHT = 92;
+const RESEARCH_TREE_ROW_GAP = 18;
+const RESEARCH_TREE_GROUP_GAP = 30;
+const RESEARCH_BRANCH_COLORS: Record<string, string> = {
+  Scouting: "#8db0a3",
+  Infrastructure: "#87b7c9",
+  Industry: "#d2a56f",
+  Energy: "#f0c269",
+  Food: "#8ecb79",
+  "Pest Control": "#d78d59",
+  Protection: "#b8c989",
+  Medicine: "#86c0b0",
+  Logistics: "#8ba3bc",
+  Defense: "#c97763"
+};
 
 function formatResource(value: number) {
   return value.toFixed(value < 10 ? 1 : 0);
@@ -238,6 +272,144 @@ const worldGeometry = (() => {
 
 const tileMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [tile.id, tile])) as Record<string, HexTileDefinition & { center: { x: number; y: number }; points: string }>;
 
+function getResearchBranchColor(branch: string) {
+  return RESEARCH_BRANCH_COLORS[branch] ?? "#d9b474";
+}
+
+function getResearchNodeState(nodeId: string, researched: string[], activeResearchNodeId?: string | null, researchPoints = 0) {
+  const node = researchNodes.find((item) => item.id === nodeId);
+  if (!node) return "locked" as const;
+  if (researched.includes(node.id)) return "done" as const;
+  if (activeResearchNodeId === node.id) return "active" as const;
+  const available = node.prerequisites.every((item) => researched.includes(item)) && researchPoints >= node.cost;
+  return available ? "available" as const : "locked" as const;
+}
+
+function buildResearchTreeLayout() {
+  const branchOrder = [...new Set(researchNodes.map((node) => node.branch))];
+  const nodeLayouts: Array<{ id: string; x: number; y: number; width: number; height: number; branch: string; tier: number }> = [];
+  const branchLabels: Array<{ key: string; branch: string; tier: number; x: number; y: number; color: string }> = [];
+  const nodeMap: Record<string, { id: string; x: number; y: number; width: number; height: number; branch: string; tier: number }> = {};
+  let maxY = 0;
+
+  [0, 1, 2, 3, 4].forEach((tier) => {
+    const tierNodes = researchNodes.filter((node) => node.tier === tier);
+    let cursorY = 56;
+    const x = tier === 0 ? RESEARCH_TREE_ROOT_X : RESEARCH_TREE_TIER_X + (tier - 1) * (RESEARCH_TREE_COLUMN_WIDTH + RESEARCH_TREE_COLUMN_GAP);
+
+    branchOrder.forEach((branch) => {
+      const branchNodes = tierNodes.filter((node) => node.branch === branch);
+      if (branchNodes.length === 0) return;
+
+      branchLabels.push({
+        key: `${tier}-${branch}`,
+        branch,
+        tier,
+        x,
+        y: Math.max(22, cursorY - 24),
+        color: getResearchBranchColor(branch)
+      });
+
+      branchNodes.forEach((node, index) => {
+        const layout = {
+          id: node.id,
+          x,
+          y: cursorY + index * (RESEARCH_TREE_NODE_HEIGHT + RESEARCH_TREE_ROW_GAP),
+          width: RESEARCH_TREE_NODE_WIDTH,
+          height: RESEARCH_TREE_NODE_HEIGHT,
+          branch,
+          tier
+        };
+        nodeLayouts.push(layout);
+        nodeMap[node.id] = layout;
+      });
+
+      cursorY += branchNodes.length * (RESEARCH_TREE_NODE_HEIGHT + RESEARCH_TREE_ROW_GAP) + RESEARCH_TREE_GROUP_GAP;
+      maxY = Math.max(maxY, cursorY);
+    });
+  });
+
+  const links = researchNodes.flatMap((node) => {
+    const target = nodeMap[node.id];
+    if (!target) return [] as Array<{ id: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
+    return node.prerequisites.flatMap((prerequisiteId) => {
+      const source = nodeMap[prerequisiteId];
+      if (!source) return [] as Array<{ id: string; x1: number; y1: number; x2: number; y2: number; color: string }>;
+      return [{
+        id: `${prerequisiteId}-${node.id}`,
+        x1: source.x + source.width,
+        y1: source.y + source.height / 2,
+        x2: target.x,
+        y2: target.y + target.height / 2,
+        color: getResearchBranchColor(target.branch)
+      }];
+    });
+  });
+
+  const width = RESEARCH_TREE_TIER_X + 4 * (RESEARCH_TREE_COLUMN_WIDTH + RESEARCH_TREE_COLUMN_GAP) + RESEARCH_TREE_NODE_WIDTH + 64;
+  const height = maxY + 32;
+
+  return { nodeLayouts, nodeMap, links, branchLabels, width, height };
+}
+
+const phaseLabels = {
+  dawn: "Dawn",
+  day: "Day",
+  dusk: "Dusk",
+  night: "Night"
+} as const;
+
+function formatDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function TimeRail() {
+  const dayIndex = useGameStore((state) => state.dayIndex);
+  const dayProgress = useGameStore((state) => state.dayProgress);
+  const dayPhase = useGameStore((state) => state.dayPhase);
+  const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
+  const activeEvent = useGameStore((state) => state.activeEvent);
+  const eventForecast = useGameStore((state) => state.eventForecast);
+  const lastForecast = eventForecast.length > 0 ? eventForecast[eventForecast.length - 1] : null;
+  const forecastHorizon = Math.max(180, ((lastForecast?.startsAt ?? (elapsedSeconds + 180)) - elapsedSeconds));
+
+  return (
+    <section className="time-rail">
+      <div className="time-rail-copy">
+        <p className="eyebrow">Time Forecast</p>
+        <div className="time-rail-headline">
+          <h2>Day {dayIndex}</h2>
+          <strong>{phaseLabels[dayPhase]}</strong>
+          <span>{activeEvent ? `${activeEvent.title} live for ${Math.ceil(activeEvent.remaining)}s` : "No active threat"}</span>
+        </div>
+      </div>
+      <div className="timeline-shell">
+        <div className="day-track">
+          <div className={`phase-chip ${dayPhase === "dawn" ? "active" : ""}`}>Dawn</div>
+          <div className={`phase-chip ${dayPhase === "day" ? "active" : ""}`}>Day</div>
+          <div className={`phase-chip ${dayPhase === "dusk" ? "active" : ""}`}>Dusk</div>
+          <div className={`phase-chip ${dayPhase === "night" ? "active" : ""}`}>Night</div>
+          <div className="day-progress" style={{ width: `${dayProgress * 100}%` }} />
+        </div>
+        <div className="forecast-track">
+          {eventForecast.map((event) => {
+            const offset = Math.max(0, event.startsAt - elapsedSeconds);
+            const left = Math.min(100, (offset / forecastHorizon) * 100);
+            return (
+              <div key={`${event.id}-${event.startsAt}`} className={`forecast-marker ${activeEvent?.id === event.id ? "active" : ""}`} style={{ left: `${left}%` }}>
+                <span>{event.title}</span>
+                <small>T-{formatDuration(offset)}</small>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+}
 const regionCenters = Object.fromEntries(
   regionDefinitions.map((region) => {
     const regionTiles = region.hexTileIds.map((tileId) => tileMap[tileId]).filter(Boolean);
@@ -307,12 +479,13 @@ function WorldMap() {
               <stop offset="0%" stopColor="rgba(255, 192, 96, 0.26)" />
               <stop offset="100%" stopColor="rgba(13, 15, 18, 0)" />
             </radialGradient>
-            {TERRAIN_TYPES.map((terrain) => {
-              const asset = terrainAssetMap[terrain];
+            {worldGeometry.tiles.map((tile) => {
+              const asset = terrainAssetMap[tile.terrainType];
+              const tileImage = getTerrainVariantImage(tile.terrainType, tile.decorVariant);
               return (
-                <pattern key={terrain} id={`terrain-${terrain}`} patternUnits="userSpaceOnUse" width={HEX_WIDTH} height={HEX_SIZE * 2}>
+                <pattern key={tile.id} id={`terrain-${tile.id}`} patternUnits="userSpaceOnUse" width={HEX_WIDTH} height={HEX_SIZE * 2}>
                   <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill="#101311" />
-                  <image href={asset.image} x={0} y={0} width={HEX_WIDTH} height={HEX_SIZE * 2} preserveAspectRatio="xMidYMid slice" />
+                  <image href={tileImage} x={0} y={0} width={HEX_WIDTH} height={HEX_SIZE * 2} preserveAspectRatio="xMidYMid slice" />
                   <rect width={HEX_WIDTH} height={HEX_SIZE * 2} fill={asset.accent} />
                 </pattern>
               );
@@ -336,16 +509,22 @@ function WorldMap() {
                 }
                 if (tile.regionId) selectRegion(tile.regionId);
               }} role="button" tabIndex={0}>
-                <polygon className="hex-base" points={tile.points} fill={`url(#terrain-${tile.terrainType})`} />
+                <polygon className="hex-base" points={tile.points} fill={`url(#terrain-${tile.id})`} />
                 <polygon className="hex-danger" points={tile.points} fill={tile.dangerTint ?? terrain.accent} />
                 <polygon className="hex-stroke" points={tile.points} stroke={terrain.stroke} />
                 {!discovered ? <polygon className="hex-fog" points={tile.points} /> : null}
                 {isCity ? (
                   <g className="city-reactor-mark">
-                    <circle cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.48} />
-                    <circle cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.27} />
-                    <path d={`M ${tile.center.x - 12} ${tile.center.y + 12} L ${tile.center.x} ${tile.center.y - 14} L ${tile.center.x + 12} ${tile.center.y + 12}`} />
-                    <text x={tile.center.x} y={tile.center.y + 30} textAnchor="middle">City</text>
+                    <circle className="city-reactor-ring outer" cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.5} />
+                    <circle className="city-reactor-ring inner" cx={tile.center.x} cy={tile.center.y} r={HEX_SIZE * 0.33} />
+                    <image
+                      href={cityVisual.worldIcon}
+                      x={tile.center.x - HEX_SIZE * 0.72}
+                      y={tile.center.y - HEX_SIZE * 0.72}
+                      width={HEX_SIZE * 1.44}
+                      height={HEX_SIZE * 1.44}
+                      preserveAspectRatio="xMidYMid meet"
+                    />
                   </g>
                 ) : null}
               </g>
@@ -375,11 +554,11 @@ function WorldMap() {
 function CityView() {
   const buildings = useGameStore((state) => state.buildings);
   const selectedSlotId = useGameStore((state) => state.selectedSlotId);
-  const selectSlot = useGameStore((state) => state.selectSlot);
+    const selectSlot = useGameStore((state) => state.selectSlot);
   const setView = useGameStore((state) => state.setView);
 
   return (
-    <section className="canvas-card">
+    <section className="canvas-card city-shell">
       <div className="panel-header">
         <div>
           <p className="eyebrow">City View</p>
@@ -387,16 +566,38 @@ function CityView() {
         </div>
         <button className="ghost-button" onClick={() => setView("world")}>Back To World</button>
       </div>
+      <div className="city-hero-frame">
+        <img className="city-hero-art" src={cityVisual.hero} alt={cityVisual.label} />
+        <div className="city-hero-overlay" />
+        <div className="city-hero-copy">
+          <p className="eyebrow">Central Bastion</p>
+          <h3>{cityVisual.label}</h3>
+          <span>Chem-industrial core, staffing hub, and survival heart of the colony.</span>
+        </div>
+      </div>
       <div className="city-plate">
-        <div className="reactor-core"><span>REACTOR</span><strong>Core</strong></div>
+        <div className="reactor-core reactor-core-art">
+          <div className="reactor-core-aura" />
+          <img className="reactor-core-image" src={cityVisual.core} alt="Reactor Core" />
+          <div className="reactor-core-copy">
+            <span>Containment Spine</span>
+            <strong>Reactor Core</strong>
+          </div>
+        </div>
         {districtSlots.map((slot) => {
           const building = buildings.find((item) => item.slotId === slot.id);
           const definition = building ? buildingMap[building.buildingId] : null;
+          const visual = definition ? getBuildingVisual(definition.id, definition.name) : null;
           return (
             <button key={slot.id} className={`district-slot ${selectedSlotId === slot.id ? "selected" : ""} ${building ? "occupied" : "empty"}`} style={{ left: `${slot.x}%`, top: `${slot.y}%` }} onClick={() => selectSlot(slot.id)}>
+              {visual ? (
+                <div className="district-icon" style={{ background: visual.tint }}>
+                  <img src={visual.icon} alt={definition?.name ?? visual.label} />
+                </div>
+              ) : null}
               <span>{slot.label}</span>
               <strong>{definition?.name ?? "Empty Slot"}</strong>
-              {building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : null}
+              {building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : <small>Ready for expansion</small>}
             </button>
           );
         })}
@@ -462,6 +663,7 @@ function DetailsPanel() {
   const view = useGameStore((state) => state.view);
   const selectedRegionId = useGameStore((state) => state.selectedRegionId);
   const selectedSlotId = useGameStore((state) => state.selectedSlotId);
+  const selectedResearchId = useGameStore((state) => state.selectedResearchId);
   const regions = useGameStore((state) => state.regions);
   const buildings = useGameStore((state) => state.buildings);
   const buildInSlot = useGameStore((state) => state.buildInSlot);
@@ -477,6 +679,7 @@ function DetailsPanel() {
   const selectedRegion = selectedRegionId ? regionMap[selectedRegionId] : null;
   const selectedRegionState = regions.find((region) => region.id === selectedRegionId);
   const selectedSlot = districtSlots.find((slot) => slot.id === selectedSlotId);
+  const selectedResearchNode = researchNodes.find((node) => node.id === selectedResearchId) ?? researchNodes[0];
   const existingBuilding = buildings.find((item) => item.slotId === selectedSlotId);
   const existingDefinition = existingBuilding ? buildingMap[existingBuilding.buildingId] : null;
   const effectiveBuilding = existingBuilding && existingDefinition ? getEffectiveBuildingData(existingDefinition, existingBuilding) : null;
@@ -496,7 +699,7 @@ function DetailsPanel() {
             </div>
             <span className={`status-pill ${selectedRegionState.state}`}>{regionStateLabel[selectedRegionState.state]}</span>
           </div>
-          <p className="panel-copy">{selectedRegion.description}</p>
+          <p className="panel-copy">{selectedRegion.description}</p>{selectedRegion.detailImage ? (<div className="region-art-frame"><img src={selectedRegion.detailImage} alt={selectedRegion.name} className="region-art" /><div className="region-art-caption"><span>{selectedRegion.archetype}</span><strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong></div></div>) : null}
           <div className="panel-grid">
             <div><span>Ring</span><strong>{selectedRegion.ring}</strong></div>
             <div><span>Terrain</span><strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong></div>
@@ -543,7 +746,18 @@ function DetailsPanel() {
           </div>
           {existingBuilding && existingDefinition && effectiveBuilding ? (
             <>
-              <p className="panel-copy">{existingDefinition.description}</p>
+              {(() => {
+                const visual = getBuildingVisual(existingDefinition.id, existingDefinition.name);
+                return (
+                  <div className="building-hero" style={{ background: visual.tint }}>
+                    <div className="building-hero-icon"><img src={visual.icon} alt={existingDefinition.name} /></div>
+                    <div>
+                      <p className="panel-copy">{existingDefinition.description}</p>
+                      <div className="building-hero-label">{visual.label}</div>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="meta-list">
                 <div className="meta-row"><span>Building</span><strong>{existingDefinition.name}</strong></div>
                 <div className="meta-row"><span>Status</span><strong className={`status-tag ${existingBuilding.enabled ? "online" : "offline"}`}>{existingBuilding.enabled ? "Online" : "Standby"}</strong></div>
@@ -607,13 +821,19 @@ function DetailsPanel() {
               <div className="subsection">
                 <h3>Build Menu</h3>
                 <div className="build-list">
-                  {buildOptions.map((definition) => (
-                    <button key={definition.id} className="build-option" onClick={() => buildInSlot(selectedSlot.id, definition.id)}>
-                      <span>{definition.name}</span>
-                      <small>{definition.description}</small>
-                      <small>{(definition.doctrineTags ?? []).join(" / ") || "generalist"}</small>
-                    </button>
-                  ))}
+                  {buildOptions.map((definition) => {
+                    const visual = getBuildingVisual(definition.id, definition.name);
+                    return (
+                      <button key={definition.id} className="build-option rich-option" onClick={() => buildInSlot(selectedSlot.id, definition.id)}>
+                        <div className="build-option-icon" style={{ background: visual.tint }}><img src={visual.icon} alt={definition.name} /></div>
+                        <div className="build-option-copy">
+                          <span>{definition.name}</span>
+                          <small>{definition.description}</small>
+                          <small>{(definition.doctrineTags ?? []).join(" / ") || "generalist"}</small>
+                        </div>
+                      </button>
+                    );
+                  })}
                   {buildOptions.length === 0 ? <div className="muted-box">All available buildings here are locked or already built.</div> : null}
                 </div>
               </div>
@@ -627,26 +847,50 @@ function DetailsPanel() {
           <div className="panel-header">
             <div>
               <p className="eyebrow">Technology</p>
-              <h2>Progression Grid</h2>
+              <h2>{selectedResearchNode.name}</h2>
+            </div>
+            <span className={`status-pill ${getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research)}`}>
+              {getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research)}
+            </span>
+          </div>
+          <p className="panel-copy">{selectedResearchNode.description}</p>
+          <div className="panel-grid">
+            <div><span>Tier</span><strong>{selectedResearchNode.tier}</strong></div>
+            <div><span>Branch</span><strong>{selectedResearchNode.branch}</strong></div>
+            <div><span>Cost</span><strong>{selectedResearchNode.cost}</strong></div>
+            <div><span>Research</span><strong>{resources.research.toFixed(0)}</strong></div>
+          </div>
+          <div className="subsection">
+            <h3>Prerequisites</h3>
+            <div className="flow-tags">
+              {selectedResearchNode.prerequisites.length > 0 ? selectedResearchNode.prerequisites.map((prerequisiteId) => {
+                const prerequisite = researchNodes.find((item) => item.id === prerequisiteId);
+                const ready = researched.includes(prerequisiteId);
+                return <span key={prerequisiteId} className={`flow-tag ${ready ? "positive" : ""}`}>{ready ? "Ready" : "Missing"}: {prerequisite?.name ?? prerequisiteId}</span>;
+              }) : <span className="flow-tag positive">No prerequisites</span>}
             </div>
           </div>
           <div className="subsection">
-            <h3>Active Research</h3>
-            <div className="card-emphasis">{activeResearch ? `${researchNodes.find((item) => item.id === activeResearch.nodeId)?.name ?? "Unknown"} (${activeResearch.progress.toFixed(0)}%)` : "No active project"}</div>
+            <h3>Unlocks</h3>
+            <div className="flow-tags">{selectedResearchNode.unlocks.map((unlock) => <span key={unlock} className="flow-tag">{unlock}</span>)}</div>
           </div>
-          <div className="tech-list">
-            {researchNodes.map((node) => {
-              const unlocked = researched.includes(node.id);
-              const available = !unlocked && !activeResearch && node.prerequisites.every((item) => researched.includes(item)) && resources.research >= node.cost;
-              return (
-                <button key={node.id} className={`tech-node ${unlocked ? "done" : available ? "available" : "locked"}`} onClick={() => startResearch(node.id)} disabled={!available}>
-                  <span>{node.branch}</span>
-                  <strong>{node.name}</strong>
-                  <small>{node.description}</small>
-                  <small>{node.doctrineTags.join(" / ")}</small>
-                </button>
-              );
-            })}
+          <div className="subsection">
+            <h3>Doctrine</h3>
+            <div className="flow-tags">{selectedResearchNode.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>)}</div>
+          </div>
+          <div className="subsection">
+            <h3>Actions</h3>
+            <div className="inline-actions single-action">
+              <button onClick={() => startResearch(selectedResearchNode.id)} disabled={getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) !== "available"}>
+                {getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "done"
+                  ? "Already unlocked"
+                  : getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "active"
+                    ? "Research in progress"
+                    : getResearchNodeState(selectedResearchNode.id, researched, activeResearch?.nodeId, resources.research) === "available"
+                      ? `Start Research (${selectedResearchNode.cost})`
+                      : "Locked"}
+              </button>
+            </div>
           </div>
         </>
       ) : null}
@@ -657,39 +901,110 @@ function DetailsPanel() {
 function ResearchCanvas() {
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
-  const branches = [...new Set(researchNodes.map((node) => node.branch))];
+  const selectedResearchId = useGameStore((state) => state.selectedResearchId);
+  const selectResearch = useGameStore((state) => state.selectResearch);
+  const resources = useGameStore((state) => state.resources);
+  const treeLayout = useMemo(() => buildResearchTreeLayout(), []);
+  const selectedNode = researchNodes.find((node) => node.id === selectedResearchId) ?? researchNodes[0];
+  const tierDescriptors = [
+    { tier: 0, label: 'Roots', className: 'root' },
+    { tier: 1, label: 'Tier 1', className: '' },
+    { tier: 2, label: 'Tier 2', className: '' },
+    { tier: 3, label: 'Tier 3', className: '' },
+    { tier: 4, label: 'Tier 4', className: '' }
+  ];
 
   return (
-    <section className="canvas-card">
-      <div className="panel-header">
+    <section className="canvas-card research-shell">
+      <div className="panel-header research-panel-header">
         <div>
-          <p className="eyebrow">Research Lattice</p>
-          <h2>Industrial Doctrine Spread</h2>
+          <p className="eyebrow">Research Canopy</p>
+          <h2>Industrial Evolution Tree</h2>
+        </div>
+        <div className="research-status-cluster">
+          <div className="status-tile">
+            <span>Research Stock</span>
+            <strong>{resources.research.toFixed(0)}</strong>
+          </div>
+          <div className="status-tile wide">
+            <span>Focus</span>
+            <strong>{activeResearch ? researchNodes.find((node) => node.id === activeResearch.nodeId)?.name ?? activeResearch.nodeId : 'No active project'}</strong>
+          </div>
         </div>
       </div>
-      <div className="research-board wide-board">
-        {branches.map((branch) => (
-          <div key={branch} className="branch-column">
-            <h3>{branch}</h3>
-            {researchNodes.filter((node) => node.branch === branch).map((node) => (
-              <article key={node.id} className={`branch-card ${researched.includes(node.id) ? "done" : activeResearch?.nodeId === node.id ? "active" : ""}`}>
-                <span>Tier {node.tier}</span>
+      <div className="research-tree-shell">
+        <div className="research-tier-row">
+          {tierDescriptors.map((descriptor) => (
+            <div key={descriptor.label} className={["research-tier-chip", descriptor.className].filter(Boolean).join(" ")}>
+              <span>{descriptor.label}</span>
+            </div>
+          ))}
+        </div>
+        <div className="research-tree-stage" style={{ width: `${treeLayout.width}px`, height: `${treeLayout.height}px` }}>
+          <svg className="research-links" viewBox={`0 0 ${treeLayout.width} ${treeLayout.height}`} preserveAspectRatio="xMinYMin meet">
+            {treeLayout.links.map((link) => {
+              const midX = (link.x1 + link.x2) / 2;
+              return (
+                <path
+                  key={link.id}
+                  d={`M ${link.x1} ${link.y1} C ${midX} ${link.y1}, ${midX} ${link.y2}, ${link.x2} ${link.y2}`}
+                  style={{ stroke: link.color }}
+                />
+              );
+            })}
+          </svg>
+          {treeLayout.branchLabels.map((label) => (
+            <div
+              key={label.key}
+              className="research-branch-label"
+              style={{ left: `${label.x}px`, top: `${label.y}px`, borderColor: label.color, color: label.color }}
+            >
+              {label.branch}
+            </div>
+          ))}
+          {treeLayout.nodeLayouts.map((layout) => {
+            const node = researchNodes.find((item) => item.id === layout.id);
+            if (!node) return null;
+            const state = getResearchNodeState(node.id, researched, activeResearch?.nodeId, resources.research);
+            const nodeStyle: CSSProperties & Record<"--branch-color", string> = {
+              left: `${layout.x}px`,
+              top: `${layout.y}px`,
+              width: `${layout.width}px`,
+              height: `${layout.height}px`,
+              "--branch-color": getResearchBranchColor(node.branch)
+            };
+            return (
+              <button
+                key={node.id}
+                className={["tree-node", state, selectedNode.id === node.id ? "selected" : ""].filter(Boolean).join(" ")}
+                style={nodeStyle}
+                onClick={() => selectResearch(node.id)}
+              >
+                <span className="tree-node-topline">
+                  <span>{node.branch}</span>
+                  <em>T{node.tier}</em>
+                </span>
                 <strong>{node.name}</strong>
                 <small>{node.description}</small>
-                <small>{node.doctrineTags.join(" / ")}</small>
-              </article>
-            ))}
-          </div>
-        ))}
+                <div className="tree-node-meta">
+                  <span>{state}</span>
+                  <span>{node.cost} RP</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
 }
-
 function BottomBar() {
   const speed = useGameStore((state) => state.speed);
   const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
+  const dayIndex = useGameStore((state) => state.dayIndex);
+  const dayPhase = useGameStore((state) => state.dayPhase);
   const activeEvent = useGameStore((state) => state.activeEvent);
+  const eventForecast = useGameStore((state) => state.eventForecast);
   const expeditions = useGameStore((state) => state.expeditions);
   const log = useGameStore((state) => state.log);
   const pollution = useGameStore((state) => state.pollution);
@@ -708,8 +1023,9 @@ function BottomBar() {
         <button onClick={saveGame}>Save</button>
         <button className="danger-lite" onClick={resetGame}>Reset</button>
       </div>
-      <div className="status-block"><span>Elapsed</span><strong>{Math.floor(elapsedSeconds / 60)}m {String(Math.floor(elapsedSeconds % 60)).padStart(2, "0")}s</strong></div>
-      <div className="status-block wide"><span>Event</span><strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : "No active threat"}</strong></div>
+      <div className="status-block"><span>Elapsed</span><strong>{formatDuration(elapsedSeconds)}</strong></div>
+      <div className="status-block"><span>Cycle</span><strong>Day {dayIndex} / {phaseLabels[dayPhase]}</strong></div>
+      <div className="status-block wide"><span>Event</span><strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : eventForecast.map((event) => `${event.title} T-${formatDuration(event.startsAt - elapsedSeconds)}`).join(" | ")}</strong></div>
       <div className="status-block"><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
       <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong></div>
       <div className="status-block wide"><span>Log</span><strong>{log[0]}</strong></div>
@@ -785,6 +1101,7 @@ export function App() {
   return (
     <div className="app-shell">
       <ResourceHud />
+      <TimeRail />
       <main className="main-layout">
         <div className="left-column">
           <ViewTabs />
@@ -802,6 +1119,25 @@ export function App() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

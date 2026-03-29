@@ -43,3 +43,23 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Operations Board now exposes doctrine mix and staffing risk, making the current city philosophy readable without opening each slot.
 - Latest verification after this pass: npm test, npm run build, and browser screenshot review in output/web-game/doctrine-pressure/shot-0.png. The text-state probe underreported some visible labels, but the screenshot itself confirms the UI is present.
 - Next suggested step: connect doctrine pressure into building staffing assignment or add mutually exclusive tier-3 doctrine evolutions for a few cornerstone buildings.
+- Started the Time/Forecast + Wave 2 content pass from the doctrine-pressure milestone and bumped the local save key again to reset incompatible older saves.
+- Added deterministic day/night state to the store with day index, phase progress, and a three-event forecast queue; solar and field outputs now react to time of day.
+- Added a forecast/timeline rail to the UI plus cycle info in the bottom bar, so upcoming storms, swarms, and contamination surges are visible before they trigger.
+- Expanded authored world content from 8 to 13 regions and increased the hex frontier radius from 3 to 4 with new biomes: petro-marsh, steam-fissures, flooded-dam, algae-salt-flats, and ash-farmland.
+- Extended terrain asset mapping and region definitions so every region now carries a dedicated detail image path for the right-side panel.
+- Added Wave 2 research nodes for oil, geothermal, hydro, steam storage, waste heat, biogas, external agriculture, fish, algae, seed vaults, mycoprotein, pollinator domes, pheromone lures, soil sterilization, filter cartridges, dosimetry, and vehicle cabin seals.
+- Added Wave 2 buildings for those new tech paths, including oil/geothermal/hydro/steam energy options, new food systems, and new pest/protection/logistics support structures.
+- Generated new art assets for the five new biome tiles and for region-detail images; also replaced Toxic Forest, Fungal Wetlands, Waste Basin, and Industrial Hulk with unique wide region art.
+- Browser QA confirmed the new timeline/forecast UI, the larger 13-region map, event onset at the expected time, and region imagery in the detail panel.
+- Latest verification for this pass: npm test, npm run build, live browser checks at http://127.0.0.1:4173, and generated assets under public/world-hex/tiles and public/world-hex/regions.
+- Added a visual polish pass for the world and city presentation with unique region art for every current region, a dedicated reactor-city hero image, and a building visual mapping layer for icon-driven UI.
+- Replaced the remaining duplicated placeholder building icons with unique generated assets for Aquaponics Hall, External Fields, Mushroom Vault, Insect Protein Farm, and GVO Crop Lab.
+- Latest verification for this art pass: npm test, npm run build, and browser review of world detail art plus city slot/build-menu icon rendering.
+- Expanded every current terrain family from a single tile to a deterministic variant set and wired world hex rendering to `decorVariant`, reducing visual repetition without making saves unstable.
+- Added a dedicated world-core city icon for the center hex and a dedicated reactor-core illustration inside the city district plate, so both world and city views now visually anchor around the same reactor identity.
+- Rebuilt the research screen into a horizontal tier tree with Roots + Tier 1-4 columns, curved prerequisite links, fixed-size nodes, and a right-side inspector fed by explicit research selection state.
+- Applied a broader atmosphere pass across world, city, and research screens: stronger depth, warmer brass highlights, darker control-room surfaces, and more premium panel treatment while preserving readability.
+- Generated additional tile variants for every biome plus new city-core/reactor visuals and integrated them into the asset mappings under public/world-hex and public/city.
+- Latest verification for this visual/tree pass: `npm test`, `npm run build`, and browser screenshots for world, research, and city views in `output/web-game/ui-pass-world.png`, `output/web-game/ui-pass-research.png`, and `output/web-game/ui-pass-city.png`.
+- Suggested next step: refine the tech tree layout spacing/branch balancing a little further, then move into a deeper HUD/detail-panel polish pass now that the main visual architecture is in place.

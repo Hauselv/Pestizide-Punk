@@ -9,7 +9,9 @@ import type {
   AlertMessage,
   BuildingDefinition,
   BuildingInstance,
+  DayPhaseId,
   DoctrineTag,
+  EventId,
   Expedition,
   ExpeditionKind,
   HazardId,
@@ -19,14 +21,19 @@ import type {
   ResourceFlow,
   ResourceId,
   RoleId,
+  ScheduledEvent,
   SnapshotState,
   ViewMode
 } from "../types";
 
-const STORAGE_KEY = "pestizide-punk-save-v5";
+const STORAGE_KEY = "pestizide-punk-save-v7";
 const BUILDING_RATE_SCALE = 0.15;
 const REGION_RATE_SCALE = 0.15;
 const MAX_BUILDING_LEVEL = 2;
+const DAY_LENGTH_SECONDS = 180;
+const DAY_PHASE_SECONDS = DAY_LENGTH_SECONDS / 4;
+const EVENT_INTERVAL_SECONDS = 90;
+const FORECAST_EVENT_COUNT = 3;
 const EVENT_SEQUENCE: ActiveEvent[] = [
   {
     id: "toxic-storm",
@@ -65,6 +72,7 @@ const researchProtectionBonuses: Partial<Record<string, ProtectionProfile>> = {
 };
 
 interface GameStore extends SnapshotState {
+  selectResearch: (nodeId: string) => void;
   setView: (view: ViewMode) => void;
   selectRegion: (regionId: string) => void;
   selectSlot: (slotId: string) => void;
@@ -169,6 +177,60 @@ function getStaffingPressure(state: SnapshotState, doctrineProfile = getDoctrine
   const industrialLoad = doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil + doctrineProfile.radical;
   const supportCapacity = freeRoles.technicians + freeRoles.researchers * 0.5 + freeRoles.workers * 0.35;
   return Math.max(0, industrialLoad - supportCapacity);
+}
+
+function getDayPhase(elapsedSeconds: number): DayPhaseId {
+  const phaseSeconds = elapsedSeconds % DAY_LENGTH_SECONDS;
+  if (phaseSeconds < DAY_PHASE_SECONDS) return "dawn";
+  if (phaseSeconds < DAY_PHASE_SECONDS * 2) return "day";
+  if (phaseSeconds < DAY_PHASE_SECONDS * 3) return "dusk";
+  return "night";
+}
+
+function getSolarPhaseMultiplier(dayPhase: DayPhaseId) {
+  if (dayPhase === "day") return 1;
+  if (dayPhase === "dawn" || dayPhase === "dusk") return 0.6;
+  return 0.2;
+}
+
+function getFieldPhaseMultiplier(dayPhase: DayPhaseId) {
+  if (dayPhase === "day") return 1;
+  if (dayPhase === "dawn" || dayPhase === "dusk") return 0.88;
+  return 0.7;
+}
+
+function getNightHazardMultiplier(dayPhase: DayPhaseId) {
+  if (dayPhase === "dusk") return 1.08;
+  if (dayPhase === "night") return 1.16;
+  return 1;
+}
+
+function getExpeditionPhaseMultiplier(dayPhase: DayPhaseId) {
+  if (dayPhase === "dusk") return 1.08;
+  if (dayPhase === "night") return 1.16;
+  return 1;
+}
+
+function buildEventForecast(elapsedSeconds: number, activeEvent: ActiveEvent | null): ScheduledEvent[] {
+  const startSlot = activeEvent ? Math.max(1, Math.floor(elapsedSeconds / EVENT_INTERVAL_SECONDS)) : Math.floor(elapsedSeconds / EVENT_INTERVAL_SECONDS) + 1;
+  return Array.from({ length: FORECAST_EVENT_COUNT }, (_, index) => {
+    const slot = startSlot + index;
+    const template = EVENT_SEQUENCE[(slot - 1) % EVENT_SEQUENCE.length];
+    return {
+      id: template.id,
+      title: template.title,
+      description: template.description,
+      startsAt: slot * EVENT_INTERVAL_SECONDS,
+      duration: template.remaining
+    };
+  });
+}
+
+function syncTemporalState(state: SnapshotState) {
+  state.dayIndex = Math.floor(state.elapsedSeconds / DAY_LENGTH_SECONDS) + 1;
+  state.dayProgress = (state.elapsedSeconds % DAY_LENGTH_SECONDS) / DAY_LENGTH_SECONDS;
+  state.dayPhase = getDayPhase(state.elapsedSeconds);
+  state.eventForecast = buildEventForecast(state.elapsedSeconds, state.activeEvent);
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -325,6 +387,9 @@ function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["a
 function createInitialState(): SnapshotState {
   const initialState: SnapshotState = {
     elapsedSeconds: 0,
+    dayIndex: 1,
+    dayProgress: 0,
+    dayPhase: "dawn",
     resources: {
       power: 42,
       water: 26,
@@ -344,6 +409,7 @@ function createInitialState(): SnapshotState {
     view: "world",
     selectedRegionId: "toxic-forest",
     selectedSlotId: null,
+    selectedResearchId: "renewable-grid",
     districts: districtSlots,
     buildings: startingBuildings,
     regions: regionDefinitions.map((region) => ({
@@ -355,6 +421,7 @@ function createInitialState(): SnapshotState {
     activeResearch: null,
     expeditions: [],
     activeEvent: null,
+    eventForecast: [],
     population: {
       total: 58,
       health: 86,
@@ -379,6 +446,7 @@ function createInitialState(): SnapshotState {
     log: ["Industrial systems pass online. City core stable, pollution contained for now."]
   };
   initialState.population.protection = getProtectionProfile(initialState);
+  syncTemporalState(initialState);
   return initialState;
 }
 
@@ -392,7 +460,14 @@ function loadState(): SnapshotState | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as SnapshotState;
-    parsed.population.protection = getProtectionProfile(parsed);
+    parsed.dayIndex ??= 1;
+    parsed.dayProgress ??= 0;
+    parsed.dayPhase ??= "dawn";
+    parsed.eventForecast ??= [];
+    if (!parsed.regions || parsed.regions.length !== regionDefinitions.length) return null;
+    parsed.selectedResearchId ??= "renewable-grid";
+  parsed.population.protection = getProtectionProfile(parsed);
+    syncTemporalState(parsed);
     return parsed;
   } catch {
     return null;
@@ -411,14 +486,15 @@ function cleanResourceBounds(state: SnapshotState) {
   state.pollution = clamp(state.pollution, 0, 100);
 }
 
-function createExpedition(kind: ExpeditionKind, regionId: string): Expedition {
+function createExpedition(kind: ExpeditionKind, regionId: string, dayPhase: DayPhaseId): Expedition {
   const baseDuration = kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
+  const adjustedDuration = Math.ceil(baseDuration * getExpeditionPhaseMultiplier(dayPhase));
   return {
     id: `${kind}-${regionId}-${Math.random().toString(36).slice(2, 7)}`,
     regionId,
     kind,
-    remaining: baseDuration,
-    total: baseDuration,
+    remaining: adjustedDuration,
+    total: adjustedDuration,
     staff:
       kind === "survey"
         ? { rangers: 2, researchers: 1 }
@@ -436,6 +512,9 @@ function tickState(state: SnapshotState, seconds: number) {
   const dt = seconds;
   const previousElapsed = state.elapsedSeconds;
   state.elapsedSeconds += dt;
+  syncTemporalState(state);
+  const dayPhase = state.dayPhase;
+  const nightHazardMultiplier = getNightHazardMultiplier(dayPhase);
   const activeEvent = state.activeEvent;
   const mitigation = getCityMitigation(state);
   const doctrineProfile = getDoctrineProfile(state);
@@ -466,7 +545,8 @@ function tickState(state: SnapshotState, seconds: number) {
     const definition = buildingMap[instance.buildingId];
     const effective = getEffectiveBuildingData(definition, instance);
     const multiplier = getBuildingMultiplier(instance.level) * BUILDING_RATE_SCALE;
-    const weatherMultiplier = activeEvent?.id === "toxic-storm" && instance.buildingId === "solar-array" ? 0.35 : 1;
+    const phaseMultiplier = instance.buildingId === "solar-array" ? getSolarPhaseMultiplier(dayPhase) : instance.buildingId === "external-fields" ? getFieldPhaseMultiplier(dayPhase) : 1;
+    const weatherMultiplier = activeEvent?.id === "toxic-storm" && instance.buildingId === "solar-array" ? 0.35 * phaseMultiplier : phaseMultiplier;
 
     Object.entries(effective.upkeep ?? {}).forEach(([resourceId, amount]) => {
       baseDelta[resourceId as ResourceId] -= Number(amount ?? 0) * weatherMultiplier * multiplier;
@@ -514,7 +594,7 @@ function tickState(state: SnapshotState, seconds: number) {
   if (activeEvent?.id === "contamination-surge") {
     baseDelta.water -= 0.2;
     pollutionDelta += Math.max(0.04, 0.16 + doctrineProfile.synthetic * 0.015 + doctrineProfile.fossil * 0.02 - doctrineProfile.clean * 0.012 - doctrineProfile.bio * 0.01);
-    state.population.contamination += Math.max(0.02, 0.1 - mitigation.spores * 0.02 - doctrineProfile.clean * 0.008 - doctrineProfile.resilient * 0.008 + doctrineProfile.radical * 0.004) * dt;
+    state.population.contamination += Math.max(0.02, 0.1 - mitigation.spores * 0.02 - doctrineProfile.clean * 0.008 - doctrineProfile.resilient * 0.008 + doctrineProfile.radical * 0.004) * nightHazardMultiplier * dt;
   }
 
   (Object.keys(baseDelta) as ResourceId[]).forEach((resourceId) => {
@@ -619,8 +699,8 @@ function tickState(state: SnapshotState, seconds: number) {
       state.activeEvent = null;
       state.log = appendLog(state.log, `${activeEvent.title} dissipated.`);
     }
-  } else if (Math.floor(previousElapsed / 90) < Math.floor(state.elapsedSeconds / 90)) {
-    const template = EVENT_SEQUENCE[(Math.floor(state.elapsedSeconds / 90) - 1) % EVENT_SEQUENCE.length];
+  } else if (Math.floor(previousElapsed / EVENT_INTERVAL_SECONDS) < Math.floor(state.elapsedSeconds / EVENT_INTERVAL_SECONDS)) {
+    const template = EVENT_SEQUENCE[(Math.floor(state.elapsedSeconds / EVENT_INTERVAL_SECONDS) - 1) % EVENT_SEQUENCE.length];
     state.activeEvent = { ...template };
     state.alerts = appendAlert(state.alerts, {
       id: `event-${Math.floor(state.elapsedSeconds)}`,
@@ -630,6 +710,7 @@ function tickState(state: SnapshotState, seconds: number) {
     state.log = appendLog(state.log, `Threat event: ${template.title}`);
   }
 
+  syncTemporalState(state);
   state.population.protection = getProtectionProfile(state);
   state.population.health = clamp(state.population.health, 0, 100);
   state.population.contamination = clamp(state.population.contamination, 0, 100);
@@ -656,11 +737,15 @@ function tickState(state: SnapshotState, seconds: number) {
 function cloneSnapshot(state: SnapshotState): SnapshotState {
   return {
     elapsedSeconds: state.elapsedSeconds,
+    dayIndex: state.dayIndex,
+    dayProgress: state.dayProgress,
+    dayPhase: state.dayPhase,
     resources: { ...state.resources },
     pollution: state.pollution,
     view: state.view,
     selectedRegionId: state.selectedRegionId,
     selectedSlotId: state.selectedSlotId,
+    selectedResearchId: state.selectedResearchId,
     districts: state.districts.map((slot) => ({ ...slot })),
     buildings: state.buildings.map((building) => ({ ...building })),
     regions: state.regions.map((region) => ({ ...region })),
@@ -668,6 +753,7 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     activeResearch: state.activeResearch ? { ...state.activeResearch } : null,
     expeditions: state.expeditions.map((expedition) => ({ ...expedition, staff: { ...expedition.staff } })),
     activeEvent: state.activeEvent ? { ...state.activeEvent } : null,
+    eventForecast: state.eventForecast.map((event) => ({ ...event })),
     population: {
       ...state.population,
       roles: { ...state.population.roles },
@@ -691,6 +777,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   selectRegion: (regionId) => set({ selectedRegionId: regionId, view: "world" }),
 
   selectSlot: (slotId) => set({ selectedSlotId: slotId, view: "city" }),
+
+  selectResearch: (nodeId) => set({ selectedResearchId: nodeId, view: "research" }),
 
   buildInSlot: (slotId, buildingId) =>
     set((state) => {
@@ -887,7 +975,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
       if (state.expeditions.some((item) => item.regionId === regionId)) return state;
 
-      const expedition = createExpedition(kind, regionId);
+      const expedition = createExpedition(kind, regionId, state.dayPhase);
       const freeRoles = getFreeRoles(state);
       const staffOk = Object.entries(expedition.staff).every(([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0));
       if (!staffOk) {
@@ -933,6 +1021,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       elapsedSeconds: state.elapsedSeconds,
       selectedRegionId: state.selectedRegionId,
       selectedSlotId: state.selectedSlotId,
+      selectedResearchId: state.selectedResearchId,
       resources: state.resources,
       pollution: state.pollution,
       population: {
@@ -952,7 +1041,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
         doctrineTags: getEffectiveBuildingData(buildingMap[building.buildingId], building).doctrineTags,
       })),
       activeResearch: state.activeResearch,
+      dayIndex: state.dayIndex,
+      dayProgress: state.dayProgress,
+      dayPhase: state.dayPhase,
+      eventForecast: state.eventForecast,
       activeEvent: state.activeEvent?.title ?? null,
+      activeEventRemaining: state.activeEvent?.remaining ?? null,
       expeditions: state.expeditions.map((item) => ({ regionId: item.regionId, kind: item.kind, remaining: item.remaining })),
       regions: state.regions.map((region) => ({ id: region.id, state: region.state, discovered: region.discovered, hexCount: regionMap[region.id]?.hexTileIds.length ?? 0 })),
       worldHexes: {
@@ -963,6 +1057,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   }
 }));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

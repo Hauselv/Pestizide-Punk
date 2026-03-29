@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { useGameStore } from "../../src/game/state/store";
-import { worldHexes } from "../../src/game/data/worldHexes";
+import { worldHexes, worldRadius } from "../../src/game/data/worldHexes";
+import { regionDefinitions } from "../../src/game/data/sectors";
 
 beforeEach(() => {
   useGameStore.getState().resetGame();
@@ -39,10 +40,12 @@ describe("Pestizide Punk store", () => {
     expect(useGameStore.getState().resources.materials).toBeLessThan(beforeMaterials);
   });
 
-  it("keeps world hexes attached to a region or the city core", () => {
+  it("keeps world hexes attached to a region or the city core on radius four map", () => {
     const regionTiles = worldHexes.filter((tile) => !tile.isCityCore);
+    expect(worldRadius).toBe(4);
     expect(regionTiles.every((tile) => tile.regionId)).toBe(true);
     expect(worldHexes.some((tile) => tile.isCityCore)).toBe(true);
+    expect(regionDefinitions).toHaveLength(13);
   });
 
   it("tracks pollution and protection layers", () => {
@@ -83,5 +86,16 @@ describe("Pestizide Punk store", () => {
     const baselinePollution = useGameStore.getState().pollution;
 
     expect(radicalPollution).toBeGreaterThan(baselinePollution);
+  });
+
+  it("tracks day phases and deterministic event forecasts", () => {
+    const state = useGameStore.getState();
+    expect(state.dayPhase).toBe("dawn");
+    expect(state.eventForecast).toHaveLength(3);
+    state.advanceTime(50000);
+    const updated = useGameStore.getState();
+    expect(["day", "dusk", "night", "dawn"]).toContain(updated.dayPhase);
+    expect(updated.dayIndex).toBeGreaterThanOrEqual(1);
+    expect(updated.eventForecast[0].startsAt).toBeGreaterThanOrEqual(updated.elapsedSeconds);
   });
 });

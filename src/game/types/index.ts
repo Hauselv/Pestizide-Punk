@@ -38,7 +38,12 @@ export type TerrainType =
   | "irradiated-badlands"
   | "industrial-hulk"
   | "mutant-nest"
-  | "neutral-rock";
+  | "neutral-rock"
+  | "petro-marsh"
+  | "steam-fissures"
+  | "flooded-dam"
+  | "algae-salt-flats"
+  | "ash-farmland";
 export type BuildingCategory =
   | "energy"
   | "production"
@@ -154,6 +159,7 @@ export interface RegionDefinition {
   ring: number;
   primaryTerrain: TerrainType;
   secondaryTerrains?: TerrainType[];
+  detailImage?: string;
   description: string;
   hazard: HazardProfile;
   resources: ResourceFlow;
@@ -200,12 +206,21 @@ export interface Expedition {
 }
 
 export type EventId = "toxic-storm" | "swarm-raid" | "contamination-surge";
+export type DayPhaseId = "dawn" | "day" | "dusk" | "night";
 
 export interface ActiveEvent {
   id: EventId;
   title: string;
   description: string;
   remaining: number;
+}
+
+export interface ScheduledEvent {
+  id: EventId;
+  title: string;
+  description: string;
+  startsAt: number;
+  duration: number;
 }
 
 export interface PopulationState {
@@ -225,11 +240,15 @@ export interface AlertMessage {
 
 export interface SnapshotState {
   elapsedSeconds: number;
+  dayIndex: number;
+  dayProgress: number;
+  dayPhase: DayPhaseId;
   resources: Record<ResourceId, number>;
   pollution: number;
   view: ViewMode;
   selectedRegionId: string | null;
   selectedSlotId: string | null;
+  selectedResearchId: string | null;
   districts: DistrictSlot[];
   buildings: BuildingInstance[];
   regions: RegionRuntime[];
@@ -237,8 +256,10 @@ export interface SnapshotState {
   activeResearch: ActiveResearch | null;
   expeditions: Expedition[];
   activeEvent: ActiveEvent | null;
+  eventForecast: ScheduledEvent[];
   population: PopulationState;
   speed: number;
   alerts: AlertMessage[];
   log: string[];
 }
+

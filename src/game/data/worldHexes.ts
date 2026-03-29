@@ -1,6 +1,6 @@
 import type { HexCoord, HexTileDefinition, TerrainType } from "../types";
 
-const WORLD_RADIUS = 3;
+const WORLD_RADIUS = 4;
 
 const primaryTerrainByRegion: Record<string, TerrainType> = {
   "toxic-forest": "toxic-forest",
@@ -10,7 +10,12 @@ const primaryTerrainByRegion: Record<string, TerrainType> = {
   "waste-basin": "chemical-waste",
   "mutant-nest": "mutant-nest",
   "irradiated-fields": "irradiated-badlands",
-  "industrial-hulk": "industrial-hulk"
+  "industrial-hulk": "industrial-hulk",
+  "petro-marsh": "petro-marsh",
+  "steam-fissures": "steam-fissures",
+  "flooded-dam": "flooded-dam",
+  "algae-salt-flats": "algae-salt-flats",
+  "ash-farmland": "ash-farmland"
 };
 
 const dangerTintByRegion: Record<string, string> = {
@@ -21,7 +26,12 @@ const dangerTintByRegion: Record<string, string> = {
   "waste-basin": "rgba(217, 111, 71, 0.2)",
   "mutant-nest": "rgba(176, 78, 97, 0.18)",
   "irradiated-fields": "rgba(128, 146, 210, 0.16)",
-  "industrial-hulk": "rgba(152, 146, 120, 0.16)"
+  "industrial-hulk": "rgba(152, 146, 120, 0.16)",
+  "petro-marsh": "rgba(99, 92, 74, 0.24)",
+  "steam-fissures": "rgba(237, 149, 94, 0.2)",
+  "flooded-dam": "rgba(90, 154, 201, 0.2)",
+  "algae-salt-flats": "rgba(93, 187, 173, 0.2)",
+  "ash-farmland": "rgba(186, 127, 78, 0.18)"
 };
 
 const regionCoords: Record<string, Array<[number, number]>> = {
@@ -32,7 +42,12 @@ const regionCoords: Record<string, Array<[number, number]>> = {
   "waste-basin": [[-1, 1], [-2, 1], [-2, 2], [-1, 2], [-3, 2]],
   "mutant-nest": [[-3, 3], [-2, 3], [-1, 3], [0, 3]],
   "irradiated-fields": [[0, -3], [1, -3], [2, -3], [-1, -2]],
-  "industrial-hulk": [[3, -3], [3, -2], [3, -1], [3, 0]]
+  "industrial-hulk": [[3, -3], [3, -2], [3, -1], [3, 0]],
+  "steam-fissures": [[0, -4], [1, -4], [2, -4], [3, -4], [4, -4]],
+  "flooded-dam": [[4, -3], [4, -2], [4, -1], [4, 0], [3, 1]],
+  "algae-salt-flats": [[2, 2], [1, 3], [0, 4], [-1, 4], [-2, 4]],
+  "ash-farmland": [[-3, 4], [-4, 4], [-4, 3], [-4, 2], [-4, 1]],
+  "petro-marsh": [[-4, 0], [-3, -1], [-2, -2], [-1, -3]]
 };
 
 function coordKey(coord: HexCoord) {
@@ -75,10 +90,15 @@ function resolveTerrainType(regionId: string, coord: HexCoord) {
   if (primary === "industrial-hulk" && noise <= 1) return "neutral-rock";
   if (primary === "overgrown-ruins" && noise === 2) return "neutral-rock";
   if (primary === "scavenger-scrapland" && noise === 1) return "neutral-rock";
-  if (primary === "chemical-waste" && ring === WORLD_RADIUS && noise >= 4) return "neutral-rock";
+  if (primary === "chemical-waste" && ring >= 3 && noise >= 4) return "neutral-rock";
   if (primary === "mutant-nest" && noise === 3) return "chemical-waste";
   if (primary === "irradiated-badlands" && noise >= 5) return "neutral-rock";
-  if (primary === "toxic-forest" && ring === WORLD_RADIUS && noise >= 5) return "neutral-rock";
+  if (primary === "toxic-forest" && ring >= 3 && noise >= 5) return "neutral-rock";
+  if (primary === "petro-marsh" && noise >= 4) return "chemical-waste";
+  if (primary === "steam-fissures" && noise >= 4) return "irradiated-badlands";
+  if (primary === "flooded-dam" && noise === 0) return "neutral-rock";
+  if (primary === "algae-salt-flats" && noise <= 1) return "fungal-wetlands";
+  if (primary === "ash-farmland" && noise >= 5) return "neutral-rock";
 
   return primary;
 }
@@ -131,3 +151,4 @@ export const regionHexMap = worldHexes.reduce<Record<string, string[]>>((map, ti
 
 export const cityCoreHex = worldHexes.find((tile) => tile.isCityCore) ?? null;
 export { boardDistance as hexRingDistance, hexDistance };
+
