@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { eventDefinitions } from "../../src/game/data/events";
 import { useGameStore } from "../../src/game/state/store";
 import { worldHexes, worldRadius } from "../../src/game/data/worldHexes";
 import { regionDefinitions } from "../../src/game/data/sectors";
@@ -6,6 +7,25 @@ import { regionDefinitions } from "../../src/game/data/sectors";
 beforeEach(() => {
   useGameStore.getState().resetGame();
 });
+
+function makeActiveEvent(id: "toxic-storm" | "swarm-raid" | "contamination-surge") {
+  const definition = eventDefinitions.find((event) => event.id === id);
+  if (!definition) throw new Error("Missing event definition");
+  return {
+    id: definition.id,
+    title: definition.title,
+    description: definition.description,
+    severity: definition.severity,
+    art: definition.art,
+    remaining: definition.baseDuration,
+    startedAt: 0,
+    responseState: "active" as const,
+    responses: definition.responses,
+    selectedResponseId: definition.responses[0]?.id,
+    mitigation: definition.responses[0]?.mitigation ?? 0,
+    timedModifier: definition.responses[0]?.timedModifier
+  };
+}
 
 describe("Pestizide Punk store", () => {
   it("advances time and generates economy output", () => {
@@ -69,33 +89,52 @@ describe("Pestizide Punk store", () => {
     const radicalState = useGameStore.getState();
     radicalState.upgradeBuilding("west");
     radicalState.chooseBuildingUpgrade("west", "throughput-smelter");
-    useGameStore.setState((state) => ({
-      ...state,
-      activeEvent: { id: "contamination-surge", title: "Contamination Surge", description: "", remaining: 12 }
-    }));
+    useGameStore.setState((state) => ({ ...state, activeEvent: makeActiveEvent("contamination-surge") }));
     radicalState.advanceTime(10000);
     const radicalPollution = useGameStore.getState().pollution;
 
     useGameStore.getState().resetGame();
     const baselineState = useGameStore.getState();
-    useGameStore.setState((state) => ({
-      ...state,
-      activeEvent: { id: "contamination-surge", title: "Contamination Surge", description: "", remaining: 12 }
-    }));
+    useGameStore.setState((state) => ({ ...state, activeEvent: makeActiveEvent("contamination-surge") }));
     baselineState.advanceTime(10000);
     const baselinePollution = useGameStore.getState().pollution;
 
     expect(radicalPollution).toBeGreaterThan(baselinePollution);
   });
 
-  it("tracks day phases and deterministic event forecasts", () => {
+  it("tracks day phases and forecast windows", () => {
     const state = useGameStore.getState();
     expect(state.dayPhase).toBe("dawn");
     expect(state.eventForecast).toHaveLength(3);
+    expect(state.eventForecast[0].forecastEnd).toBeGreaterThan(state.eventForecast[0].forecastStart);
     state.advanceTime(50000);
     const updated = useGameStore.getState();
     expect(["day", "dusk", "night", "dawn"]).toContain(updated.dayPhase);
     expect(updated.dayIndex).toBeGreaterThanOrEqual(1);
-    expect(updated.eventForecast[0].startsAt).toBeGreaterThanOrEqual(updated.elapsedSeconds);
+    expect(updated.eventForecast[0].forecastEnd).toBeGreaterThanOrEqual(updated.eventForecast[0].forecastStart);
+  });
+
+  it("spawns a pending crisis and resolves it into an active event", () => {
+    const state = useGameStore.getState();
+    state.advanceTime(200000);
+    const pending = useGameStore.getState().pendingEvent;
+    expect(pending).not.toBeNull();
+    useGameStore.getState().resolvePendingEvent(pending?.responses[0]?.id);
+    expect(useGameStore.getState().pendingEvent).toBeNull();
+    expect(useGameStore.getState().activeEvent).not.toBeNull();
+  });
+
+  it("upgrades the reactor to unlock additional slots", () => {
+    useGameStore.setState((current) => ({
+      ...current,
+      researched: [...new Set([...current.researched, "relay-network", "filter-masks", "industrial-ceramics", "detox-protocols"])],
+      resources: { ...current.resources, materials: 200, glass: 80, feedstock: 50, power: 120 }
+    }));
+    useGameStore.getState().upgradeReactor();
+    expect(useGameStore.getState().reactor.tier).toBe(2);
+    expect(useGameStore.getState().districts).toHaveLength(10);
+    useGameStore.getState().upgradeReactor();
+    expect(useGameStore.getState().reactor.tier).toBe(3);
+    expect(useGameStore.getState().districts).toHaveLength(12);
   });
 });

@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { buildingDefinitions, districtSlots, startingBuildings } from "../data/buildings";
 import { researchNodes, startingResearch } from "../data/research";
 import { regionDefinitions } from "../data/sectors";
+import { eventDefinitions } from "../data/events";
+import { baseReactorUnlockedSlotIds, getReactorTierBonuses, reactorUpgradeDefinitions } from "../data/reactor";
 import { worldHexes } from "../data/worldHexes";
 import type {
   ActiveEvent,
@@ -11,13 +13,16 @@ import type {
   BuildingInstance,
   DayPhaseId,
   DoctrineTag,
+  EventDefinition,
   EventId,
+  EventResponseOption,
   Expedition,
   ExpeditionKind,
   HazardId,
   ProtectionProfile,
   ProtectionSlotId,
   RegionDefinition,
+  ReactorState,
   ResourceFlow,
   ResourceId,
   RoleId,
@@ -26,34 +31,120 @@ import type {
   ViewMode
 } from "../types";
 
-const STORAGE_KEY = "pestizide-punk-save-v7";
+const STORAGE_KEY = "pestizide-punk-save-v8";
 const BUILDING_RATE_SCALE = 0.15;
 const REGION_RATE_SCALE = 0.15;
 const MAX_BUILDING_LEVEL = 2;
 const DAY_LENGTH_SECONDS = 180;
 const DAY_PHASE_SECONDS = DAY_LENGTH_SECONDS / 4;
-const EVENT_INTERVAL_SECONDS = 90;
 const FORECAST_EVENT_COUNT = 3;
-const EVENT_SEQUENCE: ActiveEvent[] = [
-  {
-    id: "toxic-storm",
-    title: "Toxic Storm Front",
-    description: "Solar output slumps and airborne contamination rises while the front passes.",
-    remaining: 30
-  },
-  {
-    id: "swarm-raid",
-    title: "Swarm Pressure",
-    description: "Mutant insects test the perimeter and punish weak food chains.",
-    remaining: 26
-  },
-  {
-    id: "contamination-surge",
-    title: "Contamination Surge",
-    description: "Runoff leaks push city pollution and contamination upward until systems recover.",
-    remaining: 28
+
+function deterministicUnit(seed: number, salt = 0) {
+  const value = Math.sin(seed * 12.9898 + salt * 78.233 + 0.9182) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function pickEventId(sequenceIndex: number): EventId {
+  const roll = deterministicUnit(sequenceIndex, 3);
+  if (roll < 0.34) return "toxic-storm";
+  if (roll < 0.68) return "swarm-raid";
+  return "contamination-surge";
+}
+
+function getForecastIntel(state: SnapshotState, eventId?: EventId) {
+  const baseLead = hasResearch(state, "atmospheric-watch") ? 160 : 118;
+  const baseWindow = hasResearch(state, "atmospheric-watch") ? 30 : 50;
+  let leadTime = baseLead;
+  let windowSize = baseWindow;
+  if (eventId === "swarm-raid" && hasResearch(state, "swarm-tracking")) {
+    leadTime += 34;
+    windowSize -= 12;
   }
-];
+  if (eventId === "contamination-surge" && hasResearch(state, "contamination-analytics")) {
+    leadTime += 34;
+    windowSize -= 12;
+  }
+  return {
+    leadTime,
+    windowSize: clamp(windowSize, 12, 54),
+    certainty: clamp(1 - windowSize / 72, 0.32, 0.92)
+  };
+}
+
+function createScheduledEventForIndex(sequenceIndex: number, startAt: number, state: SnapshotState): ScheduledEvent {
+  const id = pickEventId(sequenceIndex);
+  const definition = eventDefinitionMap[id];
+  const intel = getForecastIntel(state, id);
+  const duration = definition.baseDuration + Math.floor(deterministicUnit(sequenceIndex, 7) * 8);
+  const halfWindow = intel.windowSize / 2;
+  return {
+    id,
+    title: definition.title,
+    description: definition.description,
+    severity: definition.severity,
+    art: definition.art,
+    startsAt: startAt,
+    duration,
+    forecastStart: Math.max(0, startAt - halfWindow),
+    forecastEnd: startAt + halfWindow,
+    certainty: intel.certainty
+  };
+}
+
+function getScheduledEventsAroundTime(state: SnapshotState, elapsedSeconds: number, count = FORECAST_EVENT_COUNT) {
+  const visible: ScheduledEvent[] = [];
+  let startAt = 34;
+  let sequenceIndex = 0;
+  let guard = 0;
+  while (visible.length < count && guard < 64) {
+    sequenceIndex += 1;
+    startAt += 72 + Math.floor(deterministicUnit(sequenceIndex, 5) * 62);
+    const scheduled = createScheduledEventForIndex(sequenceIndex, startAt, state);
+    if (scheduled.startsAt >= elapsedSeconds) {
+      visible.push(scheduled);
+    }
+    guard += 1;
+  }
+  return visible;
+}
+
+function findTriggeredScheduledEvent(state: SnapshotState, previousElapsed: number, currentElapsed: number) {
+  let startAt = 34;
+  let sequenceIndex = 0;
+  let guard = 0;
+  while (guard < 128) {
+    sequenceIndex += 1;
+    startAt += 72 + Math.floor(deterministicUnit(sequenceIndex, 5) * 62);
+    if (startAt > currentElapsed) return null;
+    if (startAt > previousElapsed && startAt <= currentElapsed) {
+      return createScheduledEventForIndex(sequenceIndex, startAt, state);
+    }
+    guard += 1;
+  }
+  return null;
+}
+
+function createPendingEventFromSchedule(scheduled: ScheduledEvent): ActiveEvent {
+  const definition = eventDefinitionMap[scheduled.id];
+  return {
+    id: definition.id,
+    title: definition.title,
+    description: definition.description,
+    severity: definition.severity,
+    art: definition.art,
+    remaining: scheduled.duration,
+    startedAt: scheduled.startsAt,
+    responseState: "pending",
+    responses: definition.responses.map((response) => ({
+      ...response,
+      cost: response.cost ? { ...response.cost } : undefined,
+      immediate: response.immediate ? { ...response.immediate, resources: response.immediate.resources ? { ...response.immediate.resources } : undefined } : undefined,
+      timedModifier: response.timedModifier ? { ...response.timedModifier } : undefined,
+      tags: response.tags ? [...response.tags] : undefined
+    })),
+    mitigation: 0
+  };
+}
 
 const zeroProtection = (): Record<ProtectionSlotId, number> => ({
   respiratory: 0,
@@ -75,11 +166,13 @@ interface GameStore extends SnapshotState {
   selectResearch: (nodeId: string) => void;
   setView: (view: ViewMode) => void;
   selectRegion: (regionId: string) => void;
-  selectSlot: (slotId: string) => void;
+  selectSlot: (slotId: string | null) => void;
   buildInSlot: (slotId: string, buildingId: string) => void;
   toggleBuilding: (slotId: string) => void;
   upgradeBuilding: (slotId: string) => void;
   chooseBuildingUpgrade: (slotId: string, optionId: string) => void;
+  upgradeReactor: () => void;
+  resolvePendingEvent: (responseId?: string) => void;
   startResearch: (nodeId: string) => void;
   launchExpedition: (regionId: string, kind: ExpeditionKind) => void;
   setSpeed: (speed: number) => void;
@@ -96,6 +189,10 @@ const buildingMap = Object.fromEntries(
 const regionMap = Object.fromEntries(
   regionDefinitions.map((region) => [region.id, region])
 ) as Record<string, RegionDefinition>;
+
+const eventDefinitionMap = Object.fromEntries(
+  eventDefinitions.map((definition) => [definition.id, definition])
+) as Record<EventId, EventDefinition>;
 
 function mergeResourceFlow(base?: ResourceFlow, extra?: ResourceFlow) {
   const merged: ResourceFlow = { ...(base ?? {}) };
@@ -211,26 +308,78 @@ function getExpeditionPhaseMultiplier(dayPhase: DayPhaseId) {
   return 1;
 }
 
-function buildEventForecast(elapsedSeconds: number, activeEvent: ActiveEvent | null): ScheduledEvent[] {
-  const startSlot = activeEvent ? Math.max(1, Math.floor(elapsedSeconds / EVENT_INTERVAL_SECONDS)) : Math.floor(elapsedSeconds / EVENT_INTERVAL_SECONDS) + 1;
-  return Array.from({ length: FORECAST_EVENT_COUNT }, (_, index) => {
-    const slot = startSlot + index;
-    const template = EVENT_SEQUENCE[(slot - 1) % EVENT_SEQUENCE.length];
-    return {
-      id: template.id,
-      title: template.title,
-      description: template.description,
-      startsAt: slot * EVENT_INTERVAL_SECONDS,
-      duration: template.remaining
-    };
-  });
+function getDistrictsForUnlockedSlots(unlockedSlotIds: string[]) {
+  const unlocked = new Set(unlockedSlotIds);
+  return districtSlots.filter((slot) => unlocked.has(slot.id));
+}
+
+function getNextReactorUpgradeId(tier: number) {
+  return reactorUpgradeDefinitions.find((definition) => definition.tier === tier + 1)?.id ?? null;
+}
+
+function createReactorState(tier = 1, unlockedSlotIds = baseReactorUnlockedSlotIds): ReactorState {
+  return {
+    tier,
+    modules: [],
+    unlockedSlotIds: [...unlockedSlotIds],
+    nextUpgradeId: getNextReactorUpgradeId(tier)
+  };
 }
 
 function syncTemporalState(state: SnapshotState) {
   state.dayIndex = Math.floor(state.elapsedSeconds / DAY_LENGTH_SECONDS) + 1;
   state.dayProgress = (state.elapsedSeconds % DAY_LENGTH_SECONDS) / DAY_LENGTH_SECONDS;
   state.dayPhase = getDayPhase(state.elapsedSeconds);
-  state.eventForecast = buildEventForecast(state.elapsedSeconds, state.activeEvent);
+  state.eventForecast = getScheduledEventsAroundTime(state, state.elapsedSeconds);
+}
+
+function applyImmediateEventConsequences(state: SnapshotState, immediate?: EventResponseOption["immediate"]) {
+  if (!immediate) return;
+  applyFlow(state.resources, immediate.resources);
+  state.pollution = clamp(state.pollution + Number(immediate.pollution ?? 0), 0, 100);
+  state.population.contamination = clamp(state.population.contamination + Number(immediate.contamination ?? 0), 0, 100);
+  state.population.stability = clamp(state.population.stability + Number(immediate.stability ?? 0), 0, 100);
+  state.population.health = clamp(state.population.health + Number(immediate.health ?? 0), 0, 100);
+}
+
+function getIgnoreResponseId(event: ActiveEvent) {
+  return event.responses.find((response) => /ignore|ride it out|let it run/i.test(response.id + response.label))?.id ?? event.responses[event.responses.length - 1]?.id;
+}
+
+function resolvePendingEventInState(state: SnapshotState, responseId?: string) {
+  if (!state.pendingEvent) return true;
+  const pending = state.pendingEvent;
+  const selectedResponse = pending.responses.find((response) => response.id === responseId) ?? pending.responses.find((response) => response.id === getIgnoreResponseId(pending)) ?? pending.responses[pending.responses.length - 1];
+  if (!selectedResponse) return true;
+  if (selectedResponse.cost && !canAfford(state.resources, selectedResponse.cost)) {
+    state.alerts = appendAlert(state.alerts, {
+      id: `event-cost-${pending.id}` ,
+      tone: "warning",
+      text: `Insufficient stock to execute ${selectedResponse.label}.`
+    });
+    return false;
+  }
+
+  applyFlow(state.resources, selectedResponse.cost, -1);
+  applyImmediateEventConsequences(state, selectedResponse.immediate);
+
+  const durationScale = selectedResponse.timedModifier?.durationScale ?? 1;
+  state.activeEvent = {
+    ...pending,
+    responseState: "active",
+    selectedResponseId: selectedResponse.id,
+    mitigation: clamp(selectedResponse.mitigation, 0, 0.92),
+    timedModifier: selectedResponse.timedModifier ? { ...selectedResponse.timedModifier } : undefined,
+    remaining: Math.max(8, pending.remaining * durationScale)
+  };
+  state.pendingEvent = null;
+  state.log = appendLog(state.log, `${pending.title}: ${selectedResponse.label} authorized.`);
+  state.alerts = appendAlert(state.alerts, {
+    id: `event-response-${pending.id}-${selectedResponse.id}` ,
+    tone: selectedResponse.mitigation >= 0.5 ? "success" : "warning",
+    text: `${pending.title}: ${selectedResponse.label}.`
+  });
+  return true;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -385,6 +534,7 @@ function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["a
 }
 
 function createInitialState(): SnapshotState {
+  const reactor = createReactorState();
   const initialState: SnapshotState = {
     elapsedSeconds: 0,
     dayIndex: 1,
@@ -410,7 +560,7 @@ function createInitialState(): SnapshotState {
     selectedRegionId: "toxic-forest",
     selectedSlotId: null,
     selectedResearchId: "renewable-grid",
-    districts: districtSlots,
+    districts: getDistrictsForUnlockedSlots(reactor.unlockedSlotIds),
     buildings: startingBuildings,
     regions: regionDefinitions.map((region) => ({
       id: region.id,
@@ -421,7 +571,9 @@ function createInitialState(): SnapshotState {
     activeResearch: null,
     expeditions: [],
     activeEvent: null,
+    pendingEvent: null,
     eventForecast: [],
+    reactor,
     population: {
       total: 58,
       health: 86,
@@ -464,9 +616,18 @@ function loadState(): SnapshotState | null {
     parsed.dayProgress ??= 0;
     parsed.dayPhase ??= "dawn";
     parsed.eventForecast ??= [];
+    parsed.pendingEvent ??= null;
+    parsed.reactor ??= createReactorState();
+    parsed.reactor.modules ??= [];
+    parsed.reactor.unlockedSlotIds ??= [...baseReactorUnlockedSlotIds];
+    parsed.reactor.nextUpgradeId ??= getNextReactorUpgradeId(parsed.reactor.tier ?? 1);
+    parsed.districts = getDistrictsForUnlockedSlots(parsed.reactor.unlockedSlotIds);
     if (!parsed.regions || parsed.regions.length !== regionDefinitions.length) return null;
     parsed.selectedResearchId ??= "renewable-grid";
-  parsed.population.protection = getProtectionProfile(parsed);
+    if (parsed.selectedSlotId && !parsed.districts.some((slot) => slot.id === parsed.selectedSlotId)) {
+      parsed.selectedSlotId = null;
+    }
+    parsed.population.protection = getProtectionProfile(parsed);
     syncTemporalState(parsed);
     return parsed;
   } catch {
@@ -515,15 +676,22 @@ function tickState(state: SnapshotState, seconds: number) {
   syncTemporalState(state);
   const dayPhase = state.dayPhase;
   const nightHazardMultiplier = getNightHazardMultiplier(dayPhase);
+  const reactorBonuses = getReactorTierBonuses(state.reactor.tier);
   const activeEvent = state.activeEvent;
+  const activeResponse = activeEvent?.responses.find((response) => response.id === activeEvent.selectedResponseId) ?? null;
+  const mitigationFactor = 1 - Number(activeEvent?.mitigation ?? 0);
+  const eventModifier = activeEvent?.timedModifier;
   const mitigation = getCityMitigation(state);
+  Object.entries(reactorBonuses.hazardMitigation).forEach(([hazard, amount]) => {
+    mitigation[hazard as HazardId] = Number(mitigation[hazard as HazardId] ?? 0) + Number(amount ?? 0);
+  });
   const doctrineProfile = getDoctrineProfile(state);
   const staffingPressure = getStaffingPressure(state, doctrineProfile);
   const freeRoles = getFreeRoles(state);
   const storageScore = state.buildings.filter((instance) => instance.enabled && getEffectiveBuildingData(buildingMap[instance.buildingId], instance).doctrineTags.includes("storage")).reduce((sum, instance) => sum + instance.level, 0);
 
   const baseDelta: Record<ResourceId, number> = {
-    power: 0.55,
+    power: 0.55 + reactorBonuses.passivePower * 0.12,
     water: -0.12,
     food: -0.08,
     materials: 0,
@@ -534,11 +702,11 @@ function tickState(state: SnapshotState, seconds: number) {
     glass: 0,
     fertilizer: 0,
     pesticides: 0,
-    research: 0.02,
+    research: 0.02 + reactorBonuses.researchRate * 0.06,
     gear: 0
   };
 
-  let pollutionDelta = -0.05;
+  let pollutionDelta = -0.05 - reactorBonuses.contaminationShield * 0.05;
 
   state.buildings.forEach((instance) => {
     if (!instance.enabled) return;
@@ -575,16 +743,18 @@ function tickState(state: SnapshotState, seconds: number) {
   });
 
   if (activeEvent?.id === "toxic-storm") {
-    const stormBuffer = storageScore * 0.08 + doctrineProfile.clean * 0.015 + doctrineProfile.storage * 0.04 + doctrineProfile.resilient * 0.02;
-    baseDelta.power -= Math.max(0.05, 0.35 - stormBuffer);
-    state.population.contamination += Math.max(0.03, 0.12 - mitigation.toxicity * 0.03 - doctrineProfile.clean * 0.006 - doctrineProfile.resilient * 0.006) * dt;
+    const stormBuffer = storageScore * 0.08 + doctrineProfile.clean * 0.015 + doctrineProfile.storage * 0.04 + doctrineProfile.resilient * 0.02 + reactorBonuses.contaminationShield * 0.24;
+    const powerPenalty = Math.max(0.04, (0.35 - stormBuffer) * mitigationFactor - Number(eventModifier?.powerPenaltyOffset ?? 0));
+    const contaminationRate = Math.max(0.015, 0.12 - mitigation.toxicity * 0.03 - doctrineProfile.clean * 0.006 - doctrineProfile.resilient * 0.006 + Number(eventModifier?.contaminationRateOffset ?? 0));
+    baseDelta.power -= powerPenalty;
+    state.population.contamination += contaminationRate * dt;
   }
 
   if (activeEvent?.id === "swarm-raid") {
-    const towerScore = state.buildings.filter((instance) => instance.enabled && ["spray-tower", "fumigation-tower"].includes(instance.buildingId)).reduce((sum, instance) => sum + instance.level, 0);
-    const pestResponse = towerScore * 0.7 + doctrineProfile.bio * 0.35 + doctrineProfile.chemical * 0.4 + doctrineProfile.radical * 0.2;
-    const foodPenalty = Math.max(0, 0.22 - pestResponse * 0.035);
-    const stabilityPenalty = Math.max(0, 0.12 - pestResponse * 0.02);
+    const towerScore = state.buildings.filter((instance) => instance.enabled && ["spray-tower", "fumigation-tower", "pheromone-hub"].includes(instance.buildingId)).reduce((sum, instance) => sum + instance.level, 0);
+    const pestResponse = towerScore * 0.7 + doctrineProfile.bio * 0.35 + doctrineProfile.chemical * 0.4 + doctrineProfile.radical * 0.2 + (activeResponse?.tags?.includes("bio") ? 0.3 : 0);
+    const foodPenalty = Math.max(0, 0.22 * mitigationFactor - pestResponse * 0.035 - Number(eventModifier?.foodPenaltyOffset ?? 0));
+    const stabilityPenalty = Math.max(0, 0.12 * mitigationFactor - pestResponse * 0.02);
     if (foodPenalty > 0) {
       baseDelta.food -= foodPenalty;
       state.population.stability -= stabilityPenalty * dt;
@@ -592,9 +762,11 @@ function tickState(state: SnapshotState, seconds: number) {
   }
 
   if (activeEvent?.id === "contamination-surge") {
-    baseDelta.water -= 0.2;
-    pollutionDelta += Math.max(0.04, 0.16 + doctrineProfile.synthetic * 0.015 + doctrineProfile.fossil * 0.02 - doctrineProfile.clean * 0.012 - doctrineProfile.bio * 0.01);
-    state.population.contamination += Math.max(0.02, 0.1 - mitigation.spores * 0.02 - doctrineProfile.clean * 0.008 - doctrineProfile.resilient * 0.008 + doctrineProfile.radical * 0.004) * nightHazardMultiplier * dt;
+    const waterPenalty = 0.2 * mitigationFactor + Number(eventModifier?.waterPenaltyOffset ?? 0);
+    baseDelta.water -= waterPenalty;
+    pollutionDelta += Math.max(0.02, 0.16 * mitigationFactor + doctrineProfile.synthetic * 0.015 + doctrineProfile.fossil * 0.02 - doctrineProfile.clean * 0.012 - doctrineProfile.bio * 0.01 + Number(eventModifier?.pollutionRateOffset ?? 0));
+    const contaminationRate = Math.max(0.01, 0.1 * mitigationFactor - mitigation.spores * 0.02 - doctrineProfile.clean * 0.008 - doctrineProfile.resilient * 0.008 + doctrineProfile.radical * 0.004 + Number(eventModifier?.contaminationRateOffset ?? 0));
+    state.population.contamination += contaminationRate * nightHazardMultiplier * dt;
   }
 
   (Object.keys(baseDelta) as ResourceId[]).forEach((resourceId) => {
@@ -618,10 +790,12 @@ function tickState(state: SnapshotState, seconds: number) {
 
   const clinicScore = state.buildings.filter((instance) => instance.enabled && instance.buildingId === "clinic").reduce((sum, instance) => sum + instance.level, 0);
   state.population.contamination -= clinicScore * 0.08 * dt;
+  state.population.contamination -= reactorBonuses.contaminationShield * 0.22 * dt;
+  state.population.stability += reactorBonuses.stabilitySupport * dt;
 
   if (staffingPressure > 0) {
     state.population.stability -= staffingPressure * 0.025 * dt;
-    pollutionDelta += staffingPressure * 0.01;
+    state.pollution += staffingPressure * 0.01 * dt;
   }
   if (freeRoles.technicians <= 1 && doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil >= 3) {
     state.population.stability -= 0.04 * dt;
@@ -643,7 +817,7 @@ function tickState(state: SnapshotState, seconds: number) {
   }
 
   if (state.activeResearch) {
-    const researchRate = 0.65 + state.resources.research * 0.01;
+    const researchRate = 0.65 + state.resources.research * 0.01 + reactorBonuses.researchRate;
     state.activeResearch.progress += researchRate * dt;
     const node = researchNodes.find((item) => item.id === state.activeResearch?.nodeId);
     if (node && state.activeResearch.progress >= node.cost) {
@@ -651,7 +825,7 @@ function tickState(state: SnapshotState, seconds: number) {
       state.activeResearch = null;
       state.population.protection = getProtectionProfile(state);
       state.alerts = appendAlert(state.alerts, {
-        id: `research-${node.id}`,
+        id: `research-${node.id}` ,
         tone: "success",
         text: `${node.name} completed.`
       });
@@ -686,7 +860,7 @@ function tickState(state: SnapshotState, seconds: number) {
 
       state.log = appendLog(state.log, `${regionDefinition.name}: ${expedition.kind} mission completed.`);
       state.alerts = appendAlert(state.alerts, {
-        id: `expedition-${expedition.id}`,
+        id: `expedition-${expedition.id}` ,
         tone: "success",
         text: `${regionDefinition.name} ${expedition.kind} mission completed.`
       });
@@ -699,15 +873,20 @@ function tickState(state: SnapshotState, seconds: number) {
       state.activeEvent = null;
       state.log = appendLog(state.log, `${activeEvent.title} dissipated.`);
     }
-  } else if (Math.floor(previousElapsed / EVENT_INTERVAL_SECONDS) < Math.floor(state.elapsedSeconds / EVENT_INTERVAL_SECONDS)) {
-    const template = EVENT_SEQUENCE[(Math.floor(state.elapsedSeconds / EVENT_INTERVAL_SECONDS) - 1) % EVENT_SEQUENCE.length];
-    state.activeEvent = { ...template };
-    state.alerts = appendAlert(state.alerts, {
-      id: `event-${Math.floor(state.elapsedSeconds)}`,
-      tone: "danger",
-      text: `${template.title}: ${template.description}`
-    });
-    state.log = appendLog(state.log, `Threat event: ${template.title}`);
+  }
+
+  if (!state.activeEvent && !state.pendingEvent) {
+    const triggered = findTriggeredScheduledEvent(state, previousElapsed, state.elapsedSeconds);
+    if (triggered) {
+      state.pendingEvent = createPendingEventFromSchedule(triggered);
+      state.speed = 0;
+      state.alerts = appendAlert(state.alerts, {
+        id: `event-${Math.floor(state.elapsedSeconds)}` ,
+        tone: "danger",
+        text: `${triggered.title} has reached the city. Choose a response.`
+      });
+      state.log = appendLog(state.log, `Threat event: ${triggered.title}`);
+    }
   }
 
   syncTemporalState(state);
@@ -734,6 +913,21 @@ function tickState(state: SnapshotState, seconds: number) {
   }
 }
 
+function cloneEvent(event: ActiveEvent | null) {
+  if (!event) return null;
+  return {
+    ...event,
+    responses: event.responses.map((response) => ({
+      ...response,
+      cost: response.cost ? { ...response.cost } : undefined,
+      immediate: response.immediate ? { ...response.immediate, resources: response.immediate.resources ? { ...response.immediate.resources } : undefined } : undefined,
+      timedModifier: response.timedModifier ? { ...response.timedModifier } : undefined,
+      tags: response.tags ? [...response.tags] : undefined
+    })),
+    timedModifier: event.timedModifier ? { ...event.timedModifier } : undefined
+  };
+}
+
 function cloneSnapshot(state: SnapshotState): SnapshotState {
   return {
     elapsedSeconds: state.elapsedSeconds,
@@ -752,8 +946,14 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     researched: [...state.researched],
     activeResearch: state.activeResearch ? { ...state.activeResearch } : null,
     expeditions: state.expeditions.map((expedition) => ({ ...expedition, staff: { ...expedition.staff } })),
-    activeEvent: state.activeEvent ? { ...state.activeEvent } : null,
+    activeEvent: cloneEvent(state.activeEvent),
+    pendingEvent: cloneEvent(state.pendingEvent),
     eventForecast: state.eventForecast.map((event) => ({ ...event })),
+    reactor: {
+      ...state.reactor,
+      modules: [...state.reactor.modules],
+      unlockedSlotIds: [...state.reactor.unlockedSlotIds]
+    },
     population: {
       ...state.population,
       roles: { ...state.population.roles },
@@ -932,6 +1132,65 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
+  upgradeReactor: () =>
+    set((state) => {
+      const nextUpgrade = reactorUpgradeDefinitions.find((definition) => definition.id === state.reactor.nextUpgradeId) ?? null;
+      if (!nextUpgrade) return state;
+      const techReady = nextUpgrade.tech.every((techId) => hasResearch(state, techId));
+      if (!techReady) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, {
+            id: `reactor-tech-${nextUpgrade.id}` ,
+            tone: "warning",
+            text: `${nextUpgrade.name} requires more research before installation.`
+          })
+        };
+      }
+      if (!canAfford(state.resources, nextUpgrade.cost)) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, {
+            id: `reactor-cost-${nextUpgrade.id}` ,
+            tone: "warning",
+            text: `Insufficient stock to upgrade the reactor with ${nextUpgrade.name}.`
+          })
+        };
+      }
+      const resources = { ...state.resources };
+      applyFlow(resources, nextUpgrade.cost, -1);
+      const unlockedSlotIds = [...new Set([...state.reactor.unlockedSlotIds, ...nextUpgrade.unlockSlotIds])];
+      const reactor = createReactorState(nextUpgrade.tier, unlockedSlotIds);
+      const nextState = {
+        ...state,
+        resources,
+        reactor,
+        districts: getDistrictsForUnlockedSlots(unlockedSlotIds),
+        pollution: clamp(state.pollution - nextUpgrade.bonuses.contaminationShield * 4, 0, 100),
+        log: appendLog(state.log, `Reactor upgraded: ${nextUpgrade.name}.`),
+        alerts: appendAlert(state.alerts, {
+          id: `reactor-ok-${nextUpgrade.id}` ,
+          tone: "success",
+          text: `${nextUpgrade.name} commissioned. New city slots are now online.`
+        }),
+        selectedSlotId: null
+      };
+      nextState.population.protection = getProtectionProfile(nextState);
+      saveState(nextState);
+      return nextState;
+    }),
+
+  resolvePendingEvent: (responseId) =>
+    set((state) => {
+      if (!state.pendingEvent) return state;
+      const nextState = cloneSnapshot(state);
+      const resolved = resolvePendingEventInState(nextState, responseId);
+      if (!resolved) return nextState;
+      nextState.population.protection = getProtectionProfile(nextState);
+      cleanResourceBounds(nextState);
+      saveState(nextState);
+      return nextState;
+    }),
   startResearch: (nodeId) =>
     set((state) => {
       const node = researchNodes.find((item) => item.id === nodeId);
@@ -995,7 +1254,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
-  setSpeed: (speed) => set({ speed }),
+  setSpeed: (speed) => set((state) => { if (speed > 0 && state.pendingEvent) { const nextState = cloneSnapshot(state); resolvePendingEventInState(nextState, getIgnoreResponseId(nextState.pendingEvent!)); nextState.speed = speed; saveState(nextState); return nextState; } return { ...state, speed }; }),
 
   advanceTime: (ms) =>
     set((state) => {
@@ -1057,6 +1316,12 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
   }
 }));
+
+
+
+
+
+
 
 
 

@@ -1,14 +1,18 @@
 import type { BuildingDefinition, DistrictSlot } from "../types";
 
 export const districtSlots: DistrictSlot[] = [
-  { id: "north", label: "North Stack", x: 50, y: 10 },
-  { id: "north-east", label: "East Vent", x: 78, y: 22 },
-  { id: "east", label: "Relay Deck", x: 90, y: 50 },
-  { id: "south-east", label: "Sludge Gate", x: 78, y: 78 },
-  { id: "south", label: "Recovery Bay", x: 50, y: 90 },
-  { id: "south-west", label: "Filter Yard", x: 22, y: 78 },
-  { id: "west", label: "Cargo Spine", x: 10, y: 50 },
-  { id: "north-west", label: "Lab Spur", x: 22, y: 22 }
+  { id: "north", label: "North Stack", x: 50, y: 10, unlockTier: 1 },
+  { id: "north-east", label: "East Vent", x: 78, y: 22, unlockTier: 1 },
+  { id: "east", label: "Relay Deck", x: 90, y: 50, unlockTier: 1 },
+  { id: "south-east", label: "Sludge Gate", x: 78, y: 78, unlockTier: 1 },
+  { id: "south", label: "Recovery Bay", x: 50, y: 90, unlockTier: 1 },
+  { id: "south-west", label: "Filter Yard", x: 22, y: 78, unlockTier: 1 },
+  { id: "west", label: "Cargo Spine", x: 10, y: 50, unlockTier: 1 },
+  { id: "north-west", label: "Lab Spur", x: 22, y: 22, unlockTier: 1 },
+  { id: "top-crown", label: "Crown Array", x: 50, y: 1.5, unlockTier: 2 },
+  { id: "bottom-crown", label: "Ground Shield", x: 50, y: 98.5, unlockTier: 2 },
+  { id: "east-bastion", label: "East Bastion", x: 97.2, y: 50, unlockTier: 3 },
+  { id: "west-bastion", label: "West Bastion", x: 2.8, y: 50, unlockTier: 3 }
 ];
 
 export const buildingDefinitions: BuildingDefinition[] = [
@@ -835,4 +839,5 @@ export const startingBuildings = [
   { slotId: "south-west", buildingId: "water-purifier", enabled: true, level: 1 },
   { slotId: "south", buildingId: "worker-barracks", enabled: true, level: 1 }
 ];
+
 

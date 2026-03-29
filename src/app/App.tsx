@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { buildingDefinitions, districtSlots } from "../game/data/buildings";
 import { resourceDefinitions } from "../game/data/resources";
 import { researchNodes } from "../game/data/research";
+import { getReactorTierBonuses, reactorUpgradeDefinitions } from "../game/data/reactor";
 import { regionDefinitions } from "../game/data/sectors";
 import { terrainAssetMap } from "../game/data/terrainAssets";
 import { buildingVisualMap, cityVisual } from "../game/data/buildingVisuals";
@@ -440,15 +441,32 @@ function formatDuration(seconds: number) {
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
 }
 
+function formatCost(flow?: ResourceFlow) {
+  if (!flow || Object.keys(flow).length === 0) return "No direct cost";
+  return Object.entries(flow).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${amount}`).join(" / ");
+}
+
+function formatForecastWindow(event: { forecastStart: number; forecastEnd: number }, elapsedSeconds: number) {
+  const start = Math.max(0, event.forecastStart - elapsedSeconds);
+  const end = Math.max(start, event.forecastEnd - elapsedSeconds);
+  return `T-${formatDuration(start)} to T-${formatDuration(end)}`;
+}
+
+function canAffordFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow) {
+  if (!flow) return true;
+  return Object.entries(flow).every(([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0));
+}
+
 function TimeRail() {
   const dayIndex = useGameStore((state) => state.dayIndex);
   const dayProgress = useGameStore((state) => state.dayProgress);
   const dayPhase = useGameStore((state) => state.dayPhase);
   const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
   const activeEvent = useGameStore((state) => state.activeEvent);
+  const pendingEvent = useGameStore((state) => state.pendingEvent);
   const eventForecast = useGameStore((state) => state.eventForecast);
   const lastForecast = eventForecast.length > 0 ? eventForecast[eventForecast.length - 1] : null;
-  const forecastHorizon = Math.max(180, ((lastForecast?.startsAt ?? (elapsedSeconds + 180)) - elapsedSeconds));
+  const forecastHorizon = Math.max(180, ((lastForecast?.forecastEnd ?? (elapsedSeconds + 180)) - elapsedSeconds));
 
   return (
     <section className="time-rail">
@@ -457,7 +475,15 @@ function TimeRail() {
         <div className="time-rail-headline">
           <h2>Day {dayIndex}</h2>
           <strong>{phaseLabels[dayPhase]}</strong>
-          <span>{activeEvent ? `${activeEvent.title} live for ${Math.ceil(activeEvent.remaining)}s` : "No active threat"}</span>
+          <span>
+            {pendingEvent
+              ? `${pendingEvent.title} awaiting command`
+              : activeEvent
+                ? `${activeEvent.title} live for ${Math.ceil(activeEvent.remaining)}s`
+                : eventForecast.length > 0
+                  ? `${eventForecast[0].title} expected ${formatForecastWindow(eventForecast[0], elapsedSeconds)}`
+                  : "No active threat"}
+          </span>
         </div>
       </div>
       <div className="timeline-shell">
@@ -468,17 +494,20 @@ function TimeRail() {
           <div className={`phase-chip ${dayPhase === "night" ? "active" : ""}`}>Night</div>
           <div className="day-progress" style={{ width: `${dayProgress * 100}%` }} />
         </div>
-        <div className="forecast-track">
+        <div className="forecast-track bands">
           {eventForecast.map((event) => {
-            const offset = Math.max(0, event.startsAt - elapsedSeconds);
-            const left = Math.min(100, (offset / forecastHorizon) * 100);
+            const left = Math.min(100, (Math.max(0, event.forecastStart - elapsedSeconds) / forecastHorizon) * 100);
+            const right = Math.min(100, (Math.max(0, event.forecastEnd - elapsedSeconds) / forecastHorizon) * 100);
+            const width = Math.max(7, right - left);
+            const stateClass = pendingEvent?.id === event.id ? "pending" : activeEvent?.id === event.id ? "active" : left < 18 ? "imminent" : "forecasted";
             return (
-              <div key={`${event.id}-${event.startsAt}`} className={`forecast-marker ${activeEvent?.id === event.id ? "active" : ""}`} style={{ left: `${left}%` }}>
+              <div key={`${event.id}-${event.startsAt}`} className={`forecast-band ${stateClass}`} style={{ left: `${left}%`, width: `${width}%` }}>
                 <span>{event.title}</span>
-                <small>T-{formatDuration(offset)}</small>
+                <small>{formatForecastWindow(event, elapsedSeconds)}</small>
               </div>
             );
           })}
+          {pendingEvent ? <div className="forecast-pending-pill">Awaiting response: {pendingEvent.title}</div> : null}
         </div>
       </div>
     </section>
@@ -628,8 +657,11 @@ function WorldMap() {
 function CityView() {
   const buildings = useGameStore((state) => state.buildings);
   const selectedSlotId = useGameStore((state) => state.selectedSlotId);
-    const selectSlot = useGameStore((state) => state.selectSlot);
+  const districts = useGameStore((state) => state.districts);
+  const reactor = useGameStore((state) => state.reactor);
+  const selectSlot = useGameStore((state) => state.selectSlot);
   const setView = useGameStore((state) => state.setView);
+  const unlockedSlotIds = new Set(districts.map((slot) => slot.id));
 
   return (
     <section className="canvas-card city-shell">
@@ -638,7 +670,10 @@ function CityView() {
           <p className="eyebrow">City View</p>
           <h2>Reactor District Slots</h2>
         </div>
-        <button className="ghost-button" onClick={() => setView("world")}>Back To World</button>
+        <div className="world-toolbar">
+          <span className="status-pill ghost">Reactor Tier {reactor.tier}</span>
+          <button className="ghost-button" onClick={() => setView("world")}>Back To World</button>
+        </div>
       </div>
       <div className="city-hero-frame">
         <img className="city-hero-art" src={cityVisual.hero} alt={cityVisual.label} />
@@ -650,28 +685,32 @@ function CityView() {
         </div>
       </div>
       <div className="city-plate">
-        <div className="reactor-core reactor-core-art">
+        <button className={`reactor-core reactor-core-art ${selectedSlotId === null ? "selected" : ""}`} onClick={() => selectSlot(null)}>
           <div className="reactor-core-aura" />
           <img className="reactor-core-image" src={cityVisual.core} alt="Reactor Core" />
           <div className="reactor-core-copy">
             <span>Containment Spine</span>
             <strong>Reactor Core</strong>
+            <small>Tier {reactor.tier} / {districts.length} active slots</small>
           </div>
-        </div>
+        </button>
         {districtSlots.map((slot) => {
           const building = buildings.find((item) => item.slotId === slot.id);
           const definition = building ? buildingMap[building.buildingId] : null;
           const visual = definition ? getBuildingVisual(definition.id, definition.name) : null;
+          const unlocked = unlockedSlotIds.has(slot.id);
           return (
-            <button key={slot.id} className={`district-slot ${selectedSlotId === slot.id ? "selected" : ""} ${building ? "occupied" : "empty"}`} style={{ left: `${slot.x}%`, top: `${slot.y}%` }} onClick={() => selectSlot(slot.id)}>
+            <button key={slot.id} disabled={!unlocked} className={`district-slot ${selectedSlotId === slot.id ? "selected" : ""} ${building ? "occupied" : "empty"} ${unlocked ? "unlocked" : "locked"}`} style={{ left: `${slot.x}%`, top: `${slot.y}%` }} onClick={() => unlocked && selectSlot(slot.id)}>
               {visual ? (
                 <div className="district-icon" style={{ background: visual.tint }}>
                   <img src={visual.icon} alt={definition?.name ?? visual.label} />
                 </div>
               ) : null}
               <span>{slot.label}</span>
-              <strong>{definition?.name ?? "Empty Slot"}</strong>
-              {building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : <small>Ready for expansion</small>}
+              <strong>{unlocked ? (definition?.name ?? "Empty Slot") : `Locked until Reactor T${slot.unlockTier ?? 1}`}</strong>
+              {unlocked
+                ? (building ? <small>L{building.level} {building.enabled ? "Online" : "Standby"}</small> : <small>Ready for expansion</small>)
+                : <small>Expand the reactor to claim this node</small>}
             </button>
           );
         })}
@@ -744,6 +783,8 @@ function DetailsPanel() {
   const toggleBuilding = useGameStore((state) => state.toggleBuilding);
   const upgradeBuilding = useGameStore((state) => state.upgradeBuilding);
   const chooseBuildingUpgrade = useGameStore((state) => state.chooseBuildingUpgrade);
+  const reactor = useGameStore((state) => state.reactor);
+  const upgradeReactor = useGameStore((state) => state.upgradeReactor);
   const researched = useGameStore((state) => state.researched);
   const activeResearch = useGameStore((state) => state.activeResearch);
   const startResearch = useGameStore((state) => state.startResearch);
@@ -758,9 +799,13 @@ function DetailsPanel() {
   const existingDefinition = existingBuilding ? buildingMap[existingBuilding.buildingId] : null;
   const effectiveBuilding = existingBuilding && existingDefinition ? getEffectiveBuildingData(existingDefinition, existingBuilding) : null;
   const buildOptions = buildingDefinitions.filter((definition) => {
+    if (!selectedSlotId) return false;
     if (definition.unlockTech && !researched.includes(definition.unlockTech)) return false;
     return !buildings.some((instance) => instance.slotId === selectedSlotId);
   });
+  const reactorBonuses = getReactorTierBonuses(reactor.tier);
+  const nextReactorUpgrade = reactorUpgradeDefinitions.find((definition) => definition.id === reactor.nextUpgradeId) ?? null;
+  const reactorUpgradeReady = nextReactorUpgrade ? nextReactorUpgrade.tech.every((techId) => researched.includes(techId)) && canAffordFlow(resources, nextReactorUpgrade.cost) : false;
 
   return (
     <aside className="detail-panel">
@@ -810,105 +855,154 @@ function DetailsPanel() {
         </>
       ) : null}
 
-      {view === "city" && selectedSlot ? (
+      {view === "city" ? (
         <>
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow">District Slot</p>
-              <h2>{selectedSlot.label}</h2>
-            </div>
-          </div>
-          {existingBuilding && existingDefinition && effectiveBuilding ? (
+          {selectedSlot ? (
             <>
-              {(() => {
-                const visual = getBuildingVisual(existingDefinition.id, existingDefinition.name);
-                return (
-                  <div className="building-hero" style={{ background: visual.tint }}>
-                    <div className="building-hero-icon"><img src={visual.icon} alt={existingDefinition.name} /></div>
-                    <div>
-                      <p className="panel-copy">{existingDefinition.description}</p>
-                      <div className="building-hero-label">{visual.label}</div>
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">District Slot</p>
+                  <h2>{selectedSlot.label}</h2>
+                </div>
+              </div>
+              {existingBuilding && existingDefinition && effectiveBuilding ? (
+                <>
+                  {(() => {
+                    const visual = getBuildingVisual(existingDefinition.id, existingDefinition.name);
+                    return (
+                      <div className="building-hero" style={{ background: visual.tint }}>
+                        <div className="building-hero-icon"><img src={visual.icon} alt={existingDefinition.name} /></div>
+                        <div>
+                          <p className="panel-copy">{existingDefinition.description}</p>
+                          <div className="building-hero-label">{visual.label}</div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  <div className="meta-list">
+                    <div className="meta-row"><span>Building</span><strong>{existingDefinition.name}</strong></div>
+                    <div className="meta-row"><span>Status</span><strong className={`status-tag ${existingBuilding.enabled ? "online" : "offline"}`}>{existingBuilding.enabled ? "Online" : "Standby"}</strong></div>
+                    <div className="meta-row"><span>Level</span><strong>L{existingBuilding.level}</strong></div>
+                    <div className="meta-row"><span>Staff</span><strong>{Object.entries(existingDefinition.staff).map(([role, amount]) => `${amount} ${role}`).join(" / ") || "No assigned staff"}</strong></div>
+                    <div className="meta-row"><span>Doctrine</span><strong>{effectiveBuilding.selectedUpgrade?.name ?? "Base chassis"}</strong></div>
+                  </div>
+                  <div className="subsection">
+                    <h3>Output</h3>
+                    <div className="flow-tags">{formatFlow(effectiveBuilding.output, existingBuilding.level).map((item) => <span key={item} className="flow-tag positive">{item}</span>)}</div>
+                  </div>
+                  <div className="subsection">
+                    <h3>Upkeep</h3>
+                    <div className="flow-tags">{formatFlow(effectiveBuilding.upkeep, existingBuilding.level, true).map((item) => <span key={item} className="flow-tag">{item}</span>)}</div>
+                  </div>
+                  <div className="subsection">
+                    <h3>Tradeoffs</h3>
+                    <div className="flow-tags">
+                      {effectiveBuilding.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>)}
+                      {effectiveBuilding.emissions ? <span className="flow-tag warning">Emissions +{effectiveBuilding.emissions.toFixed(2)}</span> : null}
+                      {effectiveBuilding.wasteOutput.pollution ? <span className="flow-tag warning">Pollution +{effectiveBuilding.wasteOutput.pollution.toFixed(2)}</span> : null}
+                      {Object.keys(effectiveBuilding.storageCapacity).length > 0 ? <span className="flow-tag">Storage: {formatFlow(effectiveBuilding.storageCapacity)}</span> : null}
+                      {Object.keys(effectiveBuilding.protectionOutput).length > 0 ? <span className="flow-tag">Protection: {formatProtection(effectiveBuilding.protectionOutput as Record<ProtectionSlotId, number>)}</span> : null}
                     </div>
                   </div>
-                );
-              })()}
-              <div className="meta-list">
-                <div className="meta-row"><span>Building</span><strong>{existingDefinition.name}</strong></div>
-                <div className="meta-row"><span>Status</span><strong className={`status-tag ${existingBuilding.enabled ? "online" : "offline"}`}>{existingBuilding.enabled ? "Online" : "Standby"}</strong></div>
-                <div className="meta-row"><span>Level</span><strong>L{existingBuilding.level}</strong></div>
-                <div className="meta-row"><span>Staff</span><strong>{Object.entries(existingDefinition.staff).map(([role, amount]) => `${amount} ${role}`).join(" / ") || "No assigned staff"}</strong></div>
-                <div className="meta-row"><span>Doctrine</span><strong>{effectiveBuilding.selectedUpgrade?.name ?? "Base chassis"}</strong></div>
-              </div>
-              <div className="subsection">
-                <h3>Output</h3>
-                <div className="flow-tags">{formatFlow(effectiveBuilding.output, existingBuilding.level).map((item) => <span key={item} className="flow-tag positive">{item}</span>)}</div>
-              </div>
-              <div className="subsection">
-                <h3>Upkeep</h3>
-                <div className="flow-tags">{formatFlow(effectiveBuilding.upkeep, existingBuilding.level, true).map((item) => <span key={item} className="flow-tag">{item}</span>)}</div>
-              </div>
-              <div className="subsection">
-                <h3>Tradeoffs</h3>
-                <div className="flow-tags">
-                  {effectiveBuilding.doctrineTags.map((tag) => <span key={tag} className="flow-tag doctrine">{tag}</span>)}
-                  {effectiveBuilding.emissions ? <span className="flow-tag warning">Emissions +{effectiveBuilding.emissions.toFixed(2)}</span> : null}
-                  {effectiveBuilding.wasteOutput.pollution ? <span className="flow-tag warning">Pollution +{effectiveBuilding.wasteOutput.pollution.toFixed(2)}</span> : null}
-                  {Object.keys(effectiveBuilding.storageCapacity).length > 0 ? <span className="flow-tag">Storage: {formatFlow(effectiveBuilding.storageCapacity)}</span> : null}
-                  {Object.keys(effectiveBuilding.protectionOutput).length > 0 ? <span className="flow-tag">Protection: {formatProtection(effectiveBuilding.protectionOutput as Record<ProtectionSlotId, number>)}</span> : null}
-                </div>
-              </div>
-              {existingBuilding.level >= 2 && (existingDefinition.upgradeOptions?.length ?? 0) > 0 ? (
-                <div className="subsection">
-                  <h3>Doctrine Upgrade</h3>
-                  {effectiveBuilding.selectedUpgrade ? (
-                    <div className="card-emphasis doctrine-card">
-                      <strong>{effectiveBuilding.selectedUpgrade.name}</strong>
-                      <span>{effectiveBuilding.selectedUpgrade.description}</span>
+                  {existingBuilding.level >= 2 && (existingDefinition.upgradeOptions?.length ?? 0) > 0 ? (
+                    <div className="subsection">
+                      <h3>Doctrine Upgrade</h3>
+                      {effectiveBuilding.selectedUpgrade ? (
+                        <div className="card-emphasis doctrine-card">
+                          <strong>{effectiveBuilding.selectedUpgrade.name}</strong>
+                          <span>{effectiveBuilding.selectedUpgrade.description}</span>
+                        </div>
+                      ) : (
+                        <div className="build-list doctrine-list">
+                          {existingDefinition.upgradeOptions?.map((option) => (
+                            <button key={option.id} className="build-option doctrine-option" onClick={() => chooseBuildingUpgrade(selectedSlot.id, option.id)}>
+                              <span>{option.name}</span>
+                              <small>{option.description}</small>
+                              <small>{formatCost(option.cost)}</small>
+                              <small>{(option.doctrineTags ?? []).join(" / ") || "generalist"}</small>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="build-list doctrine-list">
-                      {existingDefinition.upgradeOptions?.map((option) => (
-                        <button key={option.id} className="build-option doctrine-option" onClick={() => chooseBuildingUpgrade(selectedSlot.id, option.id)}>
-                          <span>{option.name}</span>
-                          <small>{option.description}</small>
-                          <small>{Object.entries(option.cost ?? {}).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${amount}`).join(" / ") || "No extra cost"}</small>
-                          <small>{(option.doctrineTags ?? []).join(" / ") || "generalist"}</small>
-                        </button>
-                      ))}
+                  ) : null}
+                  <div className="subsection">
+                    <h3>Actions</h3>
+                    <div className="inline-actions">
+                      <button onClick={() => toggleBuilding(selectedSlot.id)}>{existingBuilding.enabled ? "Put On Standby" : "Bring Online"}</button>
+                      <button onClick={() => upgradeBuilding(selectedSlot.id)} disabled={existingBuilding.level >= 2}>
+                        {existingBuilding.level >= 2 ? "Max Level" : `Upgrade (${Object.entries(existingDefinition.cost).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${Math.ceil(Number(amount ?? 0) * 0.8 * existingBuilding.level)}`).join(" / ")})`}
+                      </button>
                     </div>
-                  )}
-                </div>
-              ) : null}
-              <div className="subsection">
-                <h3>Actions</h3>
-                <div className="inline-actions">
-                  <button onClick={() => toggleBuilding(selectedSlot.id)}>{existingBuilding.enabled ? "Put On Standby" : "Bring Online"}</button>
-                  <button onClick={() => upgradeBuilding(selectedSlot.id)} disabled={existingBuilding.level >= 2}>
-                    {existingBuilding.level >= 2 ? "Max Level" : `Upgrade (${Object.entries(existingDefinition.cost).map(([resourceId, amount]) => `${resourceDefinitions.find((resource) => resource.id === (resourceId as ResourceId))?.label ?? resourceId} ${Math.ceil(Number(amount ?? 0) * 0.8 * existingBuilding.level)}`).join(" / ")})`}
-                  </button>
-                </div>
-              </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="panel-copy">Build into this district slot to widen your economy and unlock cleaner or dirtier doctrine paths.</p>
+                  <div className="subsection">
+                    <h3>Build Menu</h3>
+                    <div className="build-list">
+                      {buildOptions.map((definition) => {
+                        const visual = getBuildingVisual(definition.id, definition.name);
+                        return (
+                          <button key={definition.id} className="build-option rich-option" onClick={() => buildInSlot(selectedSlot.id, definition.id)}>
+                            <div className="build-option-icon" style={{ background: visual.tint }}><img src={visual.icon} alt={definition.name} /></div>
+                            <div className="build-option-copy">
+                              <span>{definition.name}</span>
+                              <small>{definition.description}</small>
+                              <small>{(definition.doctrineTags ?? []).join(" / ") || "generalist"}</small>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {buildOptions.length === 0 ? <div className="muted-box">All available buildings here are locked or already built.</div> : null}
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <>
-              <p className="panel-copy">Build into this district slot to widen your economy and unlock cleaner or dirtier doctrine paths.</p>
-              <div className="subsection">
-                <h3>Build Menu</h3>
-                <div className="build-list">
-                  {buildOptions.map((definition) => {
-                    const visual = getBuildingVisual(definition.id, definition.name);
-                    return (
-                      <button key={definition.id} className="build-option rich-option" onClick={() => buildInSlot(selectedSlot.id, definition.id)}>
-                        <div className="build-option-icon" style={{ background: visual.tint }}><img src={visual.icon} alt={definition.name} /></div>
-                        <div className="build-option-copy">
-                          <span>{definition.name}</span>
-                          <small>{definition.description}</small>
-                          <small>{(definition.doctrineTags ?? []).join(" / ") || "generalist"}</small>
-                        </div>
-                      </button>
-                    );
-                  })}
-                  {buildOptions.length === 0 ? <div className="muted-box">All available buildings here are locked or already built.</div> : null}
+              <div className="panel-header">
+                <div>
+                  <p className="eyebrow">Core Console</p>
+                  <h2>Reactor Tier {reactor.tier}</h2>
+                </div>
+                <span className="status-pill available">{reactor.unlockedSlotIds.length} Slots Online</span>
+              </div>
+              <div className="reactor-dossier">
+                <img src={cityVisual.core} alt="Reactor Core" className="reactor-dossier-art" />
+                <div className="reactor-dossier-copy">
+                  <p className="panel-copy">The central reactor now governs city capacity directly. Each tier expands the bastion, steadies the grid, and hardens the colony against chemical collapse.</p>
+                  <div className="panel-grid">
+                    <div><span>Slots Online</span><strong>{reactor.unlockedSlotIds.length}</strong></div>
+                    <div><span>Next Upgrade</span><strong>{nextReactorUpgrade?.name ?? "Max tier in prototype"}</strong></div>
+                    <div><span>Passive Power</span><strong>+{reactorBonuses.passivePower.toFixed(1)}</strong></div>
+                    <div><span>Research Lift</span><strong>+{reactorBonuses.researchRate.toFixed(2)}</strong></div>
+                  </div>
+                  <div className="subsection">
+                    <h3>Core Bonuses</h3>
+                    <div className="flow-tags">
+                      <span className="flow-tag positive">Contamination shield {reactorBonuses.contaminationShield.toFixed(2)}</span>
+                      <span className="flow-tag positive">Stability support {reactorBonuses.stabilitySupport.toFixed(2)}</span>
+                      {Object.entries(reactorBonuses.hazardMitigation).map(([hazard, value]) => <span key={hazard} className="flow-tag">{hazard} {Number(value).toFixed(1)}</span>)}
+                    </div>
+                  </div>
+                  <div className="subsection">
+                    <h3>Expansion Path</h3>
+                    {nextReactorUpgrade ? (
+                      <div className="card-emphasis reactor-upgrade-card">
+                        <strong>{nextReactorUpgrade.name}</strong>
+                        <span>{nextReactorUpgrade.description}</span>
+                        <small>Requires: {nextReactorUpgrade.tech.map((techId) => researchNodeMap[techId]?.name ?? techId).join(" / ")}</small>
+                        <small>Cost: {formatCost(nextReactorUpgrade.cost)}</small>
+                        <small>Unlocks: {nextReactorUpgrade.unlockSlotIds.length > 0 ? nextReactorUpgrade.unlockSlotIds.length : 0} new slots</small>
+                        <button onClick={upgradeReactor} disabled={!reactorUpgradeReady}>{reactorUpgradeReady ? "Upgrade Reactor" : "Requirements not met"}</button>
+                      </div>
+                    ) : (
+                      <div className="muted-box">Tier 4 is installed. Future module sockets can attach here in a later pass.</div>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
@@ -1149,14 +1243,21 @@ function BottomBar() {
   const dayIndex = useGameStore((state) => state.dayIndex);
   const dayPhase = useGameStore((state) => state.dayPhase);
   const activeEvent = useGameStore((state) => state.activeEvent);
+  const pendingEvent = useGameStore((state) => state.pendingEvent);
   const eventForecast = useGameStore((state) => state.eventForecast);
   const expeditions = useGameStore((state) => state.expeditions);
   const log = useGameStore((state) => state.log);
   const pollution = useGameStore((state) => state.pollution);
+  const reactor = useGameStore((state) => state.reactor);
   const setSpeed = useGameStore((state) => state.setSpeed);
   const saveGame = useGameStore((state) => state.saveGame);
   const resetGame = useGameStore((state) => state.resetGame);
   const advanceTime = useGameStore((state) => state.advanceTime);
+  const eventSummary = pendingEvent
+    ? `${pendingEvent.title} awaiting response`
+    : activeEvent
+      ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)`
+      : eventForecast.map((event) => `${event.title} ${formatForecastWindow(event, elapsedSeconds)}`).join(" | ");
 
   return (
     <footer className="bottom-bar">
@@ -1170,11 +1271,67 @@ function BottomBar() {
       </div>
       <div className="status-block"><span>Elapsed</span><strong>{formatDuration(elapsedSeconds)}</strong></div>
       <div className="status-block"><span>Cycle</span><strong>Day {dayIndex} / {phaseLabels[dayPhase]}</strong></div>
-      <div className="status-block wide"><span>Event</span><strong>{activeEvent ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)` : eventForecast.map((event) => `${event.title} T-${formatDuration(event.startsAt - elapsedSeconds)}`).join(" | ")}</strong></div>
+      <div className="status-block"><span>Reactor</span><strong>T{reactor.tier} / {reactor.unlockedSlotIds.length} slots</strong></div>
+      <div className="status-block wide"><span>Event</span><strong>{eventSummary || "No forecast"}</strong></div>
       <div className="status-block"><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
       <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong></div>
       <div className="status-block wide"><span>Log</span><strong>{log[0]}</strong></div>
     </footer>
+  );
+}
+
+function CrisisModal() {
+  const pendingEvent = useGameStore((state) => state.pendingEvent);
+  const resources = useGameStore((state) => state.resources);
+  const resolvePendingEvent = useGameStore((state) => state.resolvePendingEvent);
+  if (!pendingEvent) return null;
+
+  return (
+    <div className="crisis-modal-backdrop">
+      <section className={`crisis-modal ${pendingEvent.id}`}>
+        <div className="crisis-art-frame">
+          <img src={pendingEvent.art} alt={pendingEvent.title} className="crisis-art" />
+          <div className="crisis-art-overlay" />
+          <div className="crisis-art-copy">
+            <p className="eyebrow">Crisis Event</p>
+            <h2>{pendingEvent.title}</h2>
+            <span>{pendingEvent.severity}</span>
+          </div>
+        </div>
+        <div className="crisis-body">
+          <div className="crisis-copy">
+            <p>{pendingEvent.description}</p>
+            <div className="flow-tags">
+              <span className="flow-tag warning">Gameplay paused until command is issued</span>
+              <span className="flow-tag">Forecast became impact reality</span>
+            </div>
+          </div>
+          <div className="crisis-options">
+            {pendingEvent.responses.map((response) => {
+              const affordable = canAffordFlow(resources, response.cost);
+              return (
+                <button key={response.id} className={`crisis-option ${affordable ? "" : "disabled"}`} onClick={() => resolvePendingEvent(response.id)} disabled={!affordable}>
+                  <div className="crisis-option-head">
+                    <strong>{response.label}</strong>
+                    <span>Mitigation {Math.round(response.mitigation * 100)}%</span>
+                  </div>
+                  <p>{response.description}</p>
+                  <small>Cost: {formatCost(response.cost)}</small>
+                </button>
+              );
+            })}
+            <button className="crisis-option ignore" onClick={() => resolvePendingEvent()}>
+              <div className="crisis-option-head">
+                <strong>Ignore / Minimal Response</strong>
+                <span>High risk</span>
+              </div>
+              <p>Preserve stock now and accept the harsher fallout of meeting the crisis unprepared.</p>
+              <small>No immediate spend</small>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1261,9 +1418,11 @@ export function App() {
         </div>
       </main>
       <BottomBar />
+      <CrisisModal />
     </div>
   );
 }
+
 
 
 

@@ -73,3 +73,12 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Added selected-path highlighting in the research tree: related nodes stay emphasized, unrelated nodes dim down, and branch labels react to the active chain.
 - Rebuilt the research inspector into a richer dossier with branch/tier hero pills, stat blocks, feeds-from/current/leads-to route panels, grouped unlock portfolio, and doctrine fingerprint sections.
 - Verified with `npm run build`, `npm test`, Playwright browser QA, and screenshot `output/web-game/ui-pass-research-dossier.png`.
+- Began the crisis-event / reactor-progression pass by upgrading the simulation model from simple auto-events to forecastable crisis instances with `pending` and `active` response states.
+- Added authored event definitions for Toxic Storm, Swarm Pressure, and Contamination Surge, each with response options, costs, mitigation values, timed modifiers, and event art.
+- Reworked the forecast timeline to use real forecast windows instead of exact second markers; the rail now shows upcoming crisis bands and a pending-response state.
+- Added reactor state and reactor upgrade definitions with tier bonuses plus slot unlock progression from 8 to 10 to 12 city slots.
+- City view now renders locked future slots, a clickable reactor core, and a reactor dossier panel with tier, bonuses, upgrade costs, and unlock requirements.
+- Added a crisis modal with large event art and choice cards so impact-phase events now pause the game and ask for a response instead of resolving invisibly.
+- Refined world readability with stronger selected/hovered tile treatment, clearer shadowed/known states, and more explicit city-core emphasis.
+- Updated simulation tests to cover the new crisis lifecycle and reactor slot unlock path.
+- Verification for this pass: `npx tsc --noEmit` passed, live browser QA confirmed forecast bands, locked reactor slots, reactor dossier, and the crisis modal flow. `npm run build` / `npm test` are currently blocked in this environment by a Vite/esbuild `spawn EPERM` startup error rather than TypeScript issues.

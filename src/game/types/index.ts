@@ -121,6 +121,7 @@ export interface DistrictSlot {
   label: string;
   x: number;
   y: number;
+  unlockTier?: number;
 }
 
 export interface SectorActionRequirement {
@@ -207,20 +208,100 @@ export interface Expedition {
 
 export type EventId = "toxic-storm" | "swarm-raid" | "contamination-surge";
 export type DayPhaseId = "dawn" | "day" | "dusk" | "night";
+export type EventSeverity = "moderate" | "major" | "extreme";
+export type EventResponseState = "forecasted" | "pending" | "active" | "resolved";
+
+export interface EventImmediateConsequence {
+  resources?: ResourceFlow;
+  pollution?: number;
+  contamination?: number;
+  stability?: number;
+  health?: number;
+}
+
+export interface TimedModifier {
+  powerPenaltyOffset?: number;
+  foodPenaltyOffset?: number;
+  waterPenaltyOffset?: number;
+  pollutionRateOffset?: number;
+  contaminationRateOffset?: number;
+  stabilityRateOffset?: number;
+  durationScale?: number;
+}
+
+export interface EventResponseOption {
+  id: string;
+  label: string;
+  description: string;
+  cost?: ResourceFlow;
+  mitigation: number;
+  immediate?: EventImmediateConsequence;
+  timedModifier?: TimedModifier;
+  tags?: DoctrineTag[];
+}
+
+export interface EventDefinition {
+  id: EventId;
+  title: string;
+  description: string;
+  severity: EventSeverity;
+  art: string;
+  baseDuration: number;
+  responses: EventResponseOption[];
+}
 
 export interface ActiveEvent {
   id: EventId;
   title: string;
   description: string;
+  severity: EventSeverity;
+  art: string;
   remaining: number;
+  startedAt: number;
+  responseState: Extract<EventResponseState, "pending" | "active">;
+  responses: EventResponseOption[];
+  selectedResponseId?: string;
+  mitigation: number;
+  timedModifier?: TimedModifier;
 }
 
 export interface ScheduledEvent {
   id: EventId;
   title: string;
   description: string;
+  severity: EventSeverity;
+  art: string;
   startsAt: number;
   duration: number;
+  forecastStart: number;
+  forecastEnd: number;
+  certainty: number;
+}
+
+export interface ReactorTierBonus {
+  passivePower: number;
+  researchRate: number;
+  contaminationShield: number;
+  stabilitySupport: number;
+  hazardMitigation: PartialRecord<HazardId, number>;
+}
+
+export interface ReactorUpgradeDefinition {
+  id: string;
+  tier: number;
+  name: string;
+  description: string;
+  cost: ResourceFlow;
+  tech: string[];
+  bonuses: ReactorTierBonus;
+  unlockSlotIds: string[];
+}
+
+export interface ReactorState {
+  tier: number;
+  modules: string[];
+  unlockedSlotIds: string[];
+  nextUpgradeId: string | null;
 }
 
 export interface PopulationState {
@@ -256,10 +337,11 @@ export interface SnapshotState {
   activeResearch: ActiveResearch | null;
   expeditions: Expedition[];
   activeEvent: ActiveEvent | null;
+  pendingEvent: ActiveEvent | null;
   eventForecast: ScheduledEvent[];
+  reactor: ReactorState;
   population: PopulationState;
   speed: number;
   alerts: AlertMessage[];
   log: string[];
 }
-

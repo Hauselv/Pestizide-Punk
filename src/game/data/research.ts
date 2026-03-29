@@ -112,6 +112,17 @@ export const researchNodes: ResearchNode[] = [
     doctrineTags: ["resilient"]
   },
   {
+    id: "atmospheric-watch",
+    name: "Atmospheric Watch",
+    branch: "Scouting",
+    tier: 1,
+    description: "Early weather vanes and chem-barometers widen the warning window for incoming crises.",
+    cost: 20,
+    prerequisites: ["scout-teams"],
+    unlocks: ["Forecast lead time +", "Storm forecast bands"],
+    doctrineTags: ["resilient", "engineered"]
+  },
+  {
     id: "oil-generation",
     name: "Oil Generation",
     branch: "Energy",
@@ -232,7 +243,29 @@ export const researchNodes: ResearchNode[] = [
     unlocks: ["Fumigation Tower"],
     doctrineTags: ["radical", "synthetic"]
   },
+    {
+    id: "swarm-tracking",
+    name: "Swarm Tracking",
+    branch: "Scouting",
+    tier: 2,
+    description: "Behavioral tracking improves insect-raid forecasts and narrows their strike window.",
+    cost: 28,
+    prerequisites: ["atmospheric-watch", "basic-pesticides"],
+    unlocks: ["Swarm forecast precision", "Bio lure timing"],
+    doctrineTags: ["resilient", "bio"]
+  },
   {
+    id: "contamination-analytics",
+    name: "Contamination Analytics",
+    branch: "Scouting",
+    tier: 2,
+    description: "Runoff analysis and plume modeling reveal contamination surges further in advance.",
+    cost: 28,
+    prerequisites: ["atmospheric-watch", "field-clinic"],
+    unlocks: ["Contamination forecast precision", "Longer crisis lead time"],
+    doctrineTags: ["clean", "engineered"]
+  },
+{
     id: "redox-batteries",
     name: "Redox Batteries",
     branch: "Energy",
@@ -499,3 +532,4 @@ export const researchNodes: ResearchNode[] = [
 ];
 
 export const startingResearch = ["scout-teams", "water-purification", "basic-refining"];
+
