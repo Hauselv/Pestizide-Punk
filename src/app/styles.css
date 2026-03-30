@@ -2277,3 +2277,248 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+
+.forecast-band {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.forecast-band-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.34;
+  filter: saturate(0.82) contrast(1.05);
+}
+
+.forecast-band-shade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(8, 10, 10, 0.18), rgba(8, 10, 10, 0.78));
+}
+
+.forecast-band-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.12rem;
+}
+
+.forecast-band-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.45rem;
+  align-items: start;
+}
+
+.forecast-band-head em {
+  font-style: normal;
+  color: #f3d3a2;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.forecast-band.major .forecast-band-head em,
+.forecast-pending-pill.major {
+  color: #ffd18d;
+}
+
+.forecast-band.extreme .forecast-band-head em,
+.forecast-pending-pill.extreme {
+  color: #ffb38b;
+}
+
+.region-state-halo {
+  fill: none;
+  stroke: rgba(255, 232, 171, 0.12);
+  stroke-width: 9;
+  opacity: 0.22;
+  filter: blur(1px);
+  pointer-events: none;
+}
+
+.region-state-halo.surveying {
+  stroke: rgba(219, 179, 92, 0.26);
+}
+
+.region-state-halo.surveyed,
+.region-state-halo.exploiting {
+  stroke: rgba(146, 196, 116, 0.22);
+}
+
+.region-state-halo.secured,
+.region-state-halo.outpost {
+  stroke: rgba(128, 210, 155, 0.22);
+}
+
+.region-state-halo.selected,
+.region-state-halo.hovered {
+  opacity: 0.5;
+  stroke-width: 12;
+}
+
+.hex-tile .hex-danger {
+  transition: opacity 140ms ease, filter 140ms ease;
+}
+
+.hex-tile.hovered .hex-danger,
+.hex-tile.selected .hex-danger {
+  opacity: 0.28;
+  filter: saturate(1.08);
+}
+
+.hex-tile .hex-stroke {
+  fill: none;
+  stroke-width: 1.35;
+}
+
+.region-hazard-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.hazard-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.58rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #f7e9c6;
+  background: linear-gradient(180deg, rgba(70, 58, 45, 0.88), rgba(29, 28, 23, 0.9));
+  border: 1px solid rgba(234, 191, 113, 0.14);
+}
+
+.district-icon,
+.build-option-icon,
+.building-hero-icon {
+  background: linear-gradient(180deg, rgba(249, 242, 221, 0.08), rgba(18, 20, 18, 0.08));
+}
+
+.district-icon img,
+.build-option-icon img,
+.building-hero-icon img {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.22));
+}
+
+.district-slot .district-icon {
+  margin-bottom: 0.48rem;
+}
+
+.event-status.with-art {
+  align-content: start;
+}
+
+.event-status-body {
+  display: grid;
+  grid-template-columns: 4.2rem 1fr;
+  gap: 0.72rem;
+  align-items: start;
+}
+
+.event-status-art {
+  width: 4.2rem;
+  height: 4.2rem;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(236, 203, 138, 0.16);
+}
+
+.event-status small {
+  display: block;
+  margin-top: 0.22rem;
+  color: #bfb6a1;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.alert-stack {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.alert-card {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.alert-card strong {
+  color: #f4e8ca;
+  font-size: 0.94rem;
+  line-height: 1.4;
+}
+
+.alert-kicker,
+.event-alert-copy span {
+  color: #d7ba82;
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.event-alert {
+  grid-template-columns: 6.4rem 1fr;
+  gap: 0.85rem;
+  align-items: stretch;
+  overflow: hidden;
+  padding: 0.55rem;
+}
+
+.event-alert-art {
+  width: 100%;
+  height: 100%;
+  min-height: 6.6rem;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid rgba(234, 198, 120, 0.14);
+}
+
+.event-alert-copy {
+  display: grid;
+  align-content: start;
+  gap: 0.28rem;
+  padding: 0.2rem 0.15rem 0.2rem 0;
+}
+
+.event-alert-copy small {
+  color: #d0c6b1;
+  line-height: 1.5;
+}
+
+.event-alert.forecast {
+  background: linear-gradient(180deg, rgba(47, 54, 46, 0.92), rgba(18, 21, 18, 0.96));
+}
+
+.event-alert.pending,
+.event-alert.active {
+  background: linear-gradient(180deg, rgba(69, 44, 35, 0.96), rgba(22, 18, 16, 0.98));
+}
+
+.event-alert.extreme {
+  box-shadow: inset 0 0 0 1px rgba(255, 175, 132, 0.12), 0 14px 30px rgba(0, 0, 0, 0.18);
+}
+
+@media (max-width: 720px) {
+  .event-alert,
+  .event-status-body {
+    grid-template-columns: 1fr;
+  }
+
+  .event-alert-art,
+  .event-status-art {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+  }
+}

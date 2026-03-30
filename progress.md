@@ -89,3 +89,12 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Added fourth terrain variants for `neutral-rock`, `chemical-waste`, `overgrown-ruins`, and `scavenger-scrapland` to reduce visual repetition in the world hex map.
 - Updated `buildingVisuals.ts`, `events.ts`, and `terrainAssets.ts` so the newly generated assets are now used directly by the live UI.
 - Verification for this asset pass: `npx tsc --noEmit` passed, browser QA loaded the updated app cleanly with no Playwright console errors, and the new event-art/terrain/icon assets are present in `public/` and visible in the running build.
+- Added a UI/art polish pass for event visibility and world readability.
+- Forecast bands now use embedded event art, severity labeling, and certainty text instead of plain text-only strips.
+- Alert stack now surfaces the leading forecast/pending/active crisis as a hero alert card with artwork, while regular alerts keep a lighter text treatment.
+- Bottom bar event status now carries a compact event thumbnail and severity context when a forecast or crisis exists.
+- World view gained soft region-state halo overlays around discovered regions to improve territory readability without obscuring terrain art.
+- Region detail view now includes a compact hazard strip directly under the region artwork for faster threat scanning.
+- Building icon presentation was normalized with contain-fit scaling and stronger framed icon treatment so city slots and build options feel more consistent.
+- Verification for this pass: 
+px tsc --noEmit passed. Browser/dev-server QA could not run in this environment because Vite/esbuild startup is still blocked by spawn EPERM before a local server can come up.

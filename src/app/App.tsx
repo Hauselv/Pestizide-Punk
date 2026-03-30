@@ -452,6 +452,20 @@ function formatForecastWindow(event: { forecastStart: number; forecastEnd: numbe
   return `T-${formatDuration(start)} to T-${formatDuration(end)}`;
 }
 
+function formatForecastCertainty(certainty?: number) {
+  return `${Math.round((certainty ?? 0) * 100)}% certainty`;
+}
+
+function getSeverityClass(severity?: string) {
+  return severity ? severity.toLowerCase() : "moderate";
+}
+
+function getRegionHazardSummary(hazard: Record<string, number>) {
+  return Object.entries(hazard)
+    .filter(([, value]) => Number(value ?? 0) > 0)
+    .sort((left, right) => Number(right[1]) - Number(left[1]));
+}
+
 function canAffordFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow) {
   if (!flow) return true;
   return Object.entries(flow).every(([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0));
@@ -498,16 +512,24 @@ function TimeRail() {
           {eventForecast.map((event) => {
             const left = Math.min(100, (Math.max(0, event.forecastStart - elapsedSeconds) / forecastHorizon) * 100);
             const right = Math.min(100, (Math.max(0, event.forecastEnd - elapsedSeconds) / forecastHorizon) * 100);
-            const width = Math.max(7, right - left);
+            const width = Math.max(12, right - left);
             const stateClass = pendingEvent?.id === event.id ? "pending" : activeEvent?.id === event.id ? "active" : left < 18 ? "imminent" : "forecasted";
             return (
-              <div key={`${event.id}-${event.startsAt}`} className={`forecast-band ${stateClass}`} style={{ left: `${left}%`, width: `${width}%` }}>
-                <span>{event.title}</span>
-                <small>{formatForecastWindow(event, elapsedSeconds)}</small>
+              <div key={`${event.id}-${event.startsAt}`} className={`forecast-band ${stateClass} ${getSeverityClass(event.severity)}`} style={{ left: `${left}%`, width: `${width}%` }}>
+                <img className="forecast-band-art" src={event.art} alt={event.title} />
+                <div className="forecast-band-shade" />
+                <div className="forecast-band-copy">
+                  <div className="forecast-band-head">
+                    <span>{event.title}</span>
+                    <em>{event.severity}</em>
+                  </div>
+                  <small>{formatForecastWindow(event, elapsedSeconds)}</small>
+                  <small>{formatForecastCertainty(event.certainty)}</small>
+                </div>
               </div>
             );
           })}
-          {pendingEvent ? <div className="forecast-pending-pill">Awaiting response: {pendingEvent.title}</div> : null}
+          {pendingEvent ? <div className={`forecast-pending-pill ${getSeverityClass(pendingEvent.severity)}`}>Awaiting response: {pendingEvent.title}</div> : null}
         </div>
       </div>
     </section>
@@ -595,6 +617,22 @@ function WorldMap() {
             })}
           </defs>
           <rect width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldGlow)" />
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
+            const labelCenter = regionCenters[region.id];
+            if (!runtime?.discovered || !labelCenter) return null;
+            const selected = selectedRegionId === region.id;
+            const hovered = hoveredRegionId === region.id;
+            return (
+              <circle
+                key={`${region.id}-halo`}
+                className={["region-state-halo", runtime.state, selected ? "selected" : "", hovered ? "hovered" : ""].filter(Boolean).join(" ")}
+                cx={labelCenter.x}
+                cy={labelCenter.y}
+                r={HEX_SIZE * (0.66 + region.hexTileIds.length * 0.14)}
+              />
+            );
+          })}
           {worldGeometry.tiles.map((tile) => {
             const runtime = tile.regionId ? regionRuntimeMap[tile.regionId] : null;
             const isCity = tile.isCityCore;
@@ -819,6 +857,11 @@ function DetailsPanel() {
             <span className={`status-pill ${selectedRegionState.state}`}>{regionStateLabel[selectedRegionState.state]}</span>
           </div>
           <p className="panel-copy">{selectedRegion.description}</p>{selectedRegion.detailImage ? (<div className="region-art-frame"><img src={selectedRegion.detailImage} alt={selectedRegion.name} className="region-art" /><div className="region-art-caption"><span>{selectedRegion.archetype}</span><strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong></div></div>) : null}
+          <div className="region-hazard-strip">
+            {getRegionHazardSummary(selectedRegion.hazard).map(([hazard, score]) => (
+              <span key={hazard} className="hazard-chip">{hazard} {score}</span>
+            ))}
+          </div>
           <div className="panel-grid">
             <div><span>Ring</span><strong>{selectedRegion.ring}</strong></div>
             <div><span>Terrain</span><strong>{terrainAssetMap[selectedRegion.primaryTerrain].label}</strong></div>
@@ -1258,6 +1301,7 @@ function BottomBar() {
     : activeEvent
       ? `${activeEvent.title} (${Math.ceil(activeEvent.remaining)}s)`
       : eventForecast.map((event) => `${event.title} ${formatForecastWindow(event, elapsedSeconds)}`).join(" | ");
+  const eventVisual = pendingEvent ?? activeEvent ?? eventForecast[0] ?? null;
 
   return (
     <footer className="bottom-bar">
@@ -1272,7 +1316,18 @@ function BottomBar() {
       <div className="status-block"><span>Elapsed</span><strong>{formatDuration(elapsedSeconds)}</strong></div>
       <div className="status-block"><span>Cycle</span><strong>Day {dayIndex} / {phaseLabels[dayPhase]}</strong></div>
       <div className="status-block"><span>Reactor</span><strong>T{reactor.tier} / {reactor.unlockedSlotIds.length} slots</strong></div>
-      <div className="status-block wide"><span>Event</span><strong>{eventSummary || "No forecast"}</strong></div>
+            <div className={`status-block wide event-status ${eventVisual ? "with-art" : ""}`}>
+        <span>Event</span>
+        {eventVisual ? (
+          <div className="event-status-body">
+            <img src={eventVisual.art} alt={eventVisual.title} className="event-status-art" />
+            <div>
+              <strong>{eventSummary || "No forecast"}</strong>
+              <small>{eventVisual.severity} threat picture</small>
+            </div>
+          </div>
+        ) : <strong>{eventSummary || "No forecast"}</strong>}
+      </div>
       <div className="status-block"><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
       <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong></div>
       <div className="status-block wide"><span>Log</span><strong>{log[0]}</strong></div>
@@ -1337,9 +1392,34 @@ function CrisisModal() {
 
 function AlertStack() {
   const alerts = useGameStore((state) => state.alerts);
-  return <div className="alert-stack">{alerts.map((alert) => <div key={alert.id} className={`alert-card ${alert.tone}`}>{alert.text}</div>)}</div>;
-}
+  const pendingEvent = useGameStore((state) => state.pendingEvent);
+  const activeEvent = useGameStore((state) => state.activeEvent);
+  const eventForecast = useGameStore((state) => state.eventForecast);
+  const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
+  const forecastHeroEvent = !pendingEvent && !activeEvent ? eventForecast[0] ?? null : null;
+  const heroEvent = pendingEvent ?? activeEvent ?? forecastHeroEvent;
+  const heroEventCaption = pendingEvent || activeEvent
+    ? heroEvent?.description ?? ""
+    : forecastHeroEvent
+      ? formatForecastWindow(forecastHeroEvent, elapsedSeconds)
+      : "";
 
+  return (
+    <div className="alert-stack">
+      {heroEvent ? (
+        <div className={`alert-card event-alert ${pendingEvent ? "pending" : activeEvent ? "active" : "forecast"} ${getSeverityClass(heroEvent.severity)}`}>
+          <img src={heroEvent.art} alt={heroEvent.title} className="event-alert-art" />
+          <div className="event-alert-copy">
+            <span>{pendingEvent ? "Awaiting response" : activeEvent ? "Crisis active" : "Forecast tracked"}</span>
+            <strong>{heroEvent.title}</strong>
+            <small>{heroEventCaption}</small>
+          </div>
+        </div>
+      ) : null}
+      {alerts.map((alert) => <div key={alert.id} className={`alert-card ${alert.tone}`}><span className="alert-kicker">{alert.tone}</span><strong>{alert.text}</strong></div>)}
+    </div>
+  );
+}
 function OperationsPanel() {
   const buildings = useGameStore((state) => state.buildings);
   const expeditions = useGameStore((state) => state.expeditions);
