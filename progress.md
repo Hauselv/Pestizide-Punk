@@ -98,3 +98,8 @@ Original prompt: Build the first playable implementation of "Pestizide Punk" as 
 - Building icon presentation was normalized with contain-fit scaling and stronger framed icon treatment so city slots and build options feel more consistent.
 - Verification for this pass: 
 px tsc --noEmit passed. Browser/dev-server QA could not run in this environment because Vite/esbuild startup is still blocked by spawn EPERM before a local server can come up.
+- Added a second premium UI pass centered on crisis decision clarity, richer region dossiers, and stronger research dossier flavor.
+- World region detail now includes a three-card atmosphere grid for hazard pressure, resource focus, and entry burden right below the region art.
+- Crisis modal now surfaces a signal grid for severity, response window, and response count, and each response card shows compact outcome tags instead of only plain text cost lines.
+- Research dossier hero now carries a doctrine motif strip so branch identity reads earlier in the panel.
+- Verification for this pass: npx tsc --noEmit passed. Local server on http://127.0.0.1:4173 responded, but automated Playwright screenshot QA was blocked in this environment by a local permission error while creating the Playwright MCP cache directory.

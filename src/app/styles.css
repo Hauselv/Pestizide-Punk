@@ -2522,3 +2522,115 @@ button {
     aspect-ratio: 16 / 9;
   }
 }
+
+
+.region-atmosphere-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.region-signal-card,
+.crisis-signal-card {
+  display: grid;
+  gap: 0.28rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(55, 53, 44, 0.76), rgba(22, 24, 20, 0.88));
+  border: 1px solid rgba(236, 204, 140, 0.12);
+}
+
+.region-signal-card span,
+.crisis-signal-card span {
+  color: #bcaf94;
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.region-signal-card strong,
+.crisis-signal-card strong {
+  color: #f6edd8;
+  font-size: 1rem;
+}
+
+.region-signal-card small,
+.crisis-signal-card small {
+  color: #d1c8b3;
+  line-height: 1.45;
+}
+
+.crisis-modal.major {
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 207, 135, 0.08);
+}
+
+.crisis-modal.extreme {
+  box-shadow: 0 34px 94px rgba(0, 0, 0, 0.46), 0 0 0 1px rgba(255, 156, 112, 0.12);
+}
+
+.crisis-art-frame::after {
+  content: "";
+  position: absolute;
+  inset: auto 1rem 0.8rem 1rem;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 214, 146, 0), rgba(255, 214, 146, 0.5), rgba(255, 214, 146, 0));
+}
+
+.crisis-copy {
+  align-content: start;
+}
+
+.crisis-signal-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.crisis-option {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.crisis-option-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.crisis-option .flow-tag {
+  font-size: 0.65rem;
+}
+
+.crisis-option.ignore .flow-tag {
+  border-color: rgba(255, 164, 124, 0.22);
+}
+
+.research-dossier-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.dossier-motif-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+}
+
+.motif-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.62rem;
+  border-radius: 999px;
+  background: rgba(15, 18, 16, 0.58);
+  border: 1px solid rgba(236, 205, 141, 0.14);
+  color: #f2e4bf;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+@media (min-width: 920px) {
+  .region-atmosphere-grid,
+  .crisis-signal-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

@@ -1072,6 +1072,9 @@ function DetailsPanel() {
             </div>
             <section className="research-dossier" style={selectedResearchDossierStyle}>
               <div className="research-dossier-hero">
+                <div className="dossier-motif-strip">
+                  {selectedResearchNode.doctrineTags.length > 0 ? selectedResearchNode.doctrineTags.map((tag) => <span key={tag} className="motif-pill">{tag}</span>) : <span className="motif-pill">generalist</span>}
+                </div>
                 <div>
                   <div className="dossier-kicker-row">
                     <span className="dossier-branch-pill">{selectedResearchNode.branch}</span>
@@ -1343,7 +1346,7 @@ function CrisisModal() {
 
   return (
     <div className="crisis-modal-backdrop">
-      <section className={`crisis-modal ${pendingEvent.id}`}>
+      <section className={`crisis-modal ${pendingEvent.id} ${getSeverityClass(pendingEvent.severity)}`}>
         <div className="crisis-art-frame">
           <img src={pendingEvent.art} alt={pendingEvent.title} className="crisis-art" />
           <div className="crisis-art-overlay" />
