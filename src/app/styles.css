@@ -664,6 +664,112 @@ button {
   display: block;
 }
 
+.world-scan-grid {
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+.world-vignette {
+  opacity: 1;
+  pointer-events: none;
+}
+
+.world-route-line {
+  fill: none;
+  stroke: rgba(255, 223, 151, 0.36);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-dasharray: 7 8;
+  filter: drop-shadow(0 0 8px rgba(247, 205, 122, 0.18));
+  pointer-events: none;
+}
+
+.region-atmosphere {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.region-atmosphere-outer,
+.region-atmosphere-mid {
+  opacity: 0.14;
+  filter: blur(8px);
+}
+
+.region-atmosphere.selected .region-atmosphere-outer,
+.region-atmosphere.hovered .region-atmosphere-outer {
+  opacity: 0.24;
+}
+
+.region-atmosphere.selected .region-atmosphere-mid,
+.region-atmosphere.hovered .region-atmosphere-mid {
+  opacity: 0.2;
+}
+
+.region-ambient {
+  pointer-events: none;
+  opacity: 0.54;
+  mix-blend-mode: screen;
+}
+
+.region-ambient.selected,
+.region-ambient.hovered {
+  opacity: 0.78;
+}
+
+.ambient-orb,
+.ambient-speck {
+  fill: rgba(173, 232, 178, 0.16);
+}
+
+.ambient-wave,
+.ambient-plume {
+  fill: none;
+  stroke: rgba(184, 236, 193, 0.2);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ambient-wave {
+  stroke-width: 5;
+}
+
+.ambient-plume {
+  stroke-width: 4.2;
+}
+
+.ambient-speck {
+  fill: rgba(255, 212, 143, 0.18);
+}
+
+.drift-a,
+.drift-b,
+.drift-c,
+.pulse-a,
+.pulse-b {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.drift-a {
+  animation: worldAmbientDriftA 8.8s ease-in-out infinite;
+}
+
+.drift-b {
+  animation: worldAmbientDriftB 10.6s ease-in-out infinite;
+}
+
+.drift-c {
+  animation: worldAmbientDriftC 7.4s ease-in-out infinite;
+}
+
+.pulse-a {
+  animation: worldAmbientPulse 6.8s ease-in-out infinite;
+}
+
+.pulse-b {
+  animation: worldAmbientPulse 5.6s ease-in-out infinite reverse;
+}
+
 .hex-tile {
   cursor: pointer;
 }
@@ -754,8 +860,95 @@ button {
   stroke-width: 4px;
 }
 
-.region-label.selected text {
+.region-label {
+  pointer-events: none;
+}
+
+.region-label-pill {
+  fill: rgba(10, 13, 14, 0.76);
+  stroke: rgba(239, 205, 139, 0.16);
+  stroke-width: 1.1;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.24));
+}
+
+.region-label-dot {
+  fill: rgba(140, 205, 160, 0.88);
+  stroke: rgba(244, 237, 204, 0.72);
+  stroke-width: 1;
+}
+
+.region-label.selected .region-label-pill,
+.region-label.hovered .region-label-pill {
+  fill: rgba(26, 19, 16, 0.86);
+  stroke: rgba(255, 214, 142, 0.34);
+}
+
+.region-label.selected .region-label-dot,
+.region-label.hovered .region-label-dot {
+  fill: rgba(255, 190, 116, 0.94);
+}
+
+.region-label.selected text,
+.region-label.hovered text {
   fill: #ffd897;
+}
+
+.region-landmark {
+  pointer-events: none;
+  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.26));
+  transition: transform 140ms ease, opacity 140ms ease;
+}
+
+.region-landmark.selected,
+.region-landmark.hovered {
+  transform: scale(1.04);
+}
+
+.region-landmark-plinth {
+  opacity: 0.56;
+}
+
+.region-landmark-core {
+  opacity: 0.9;
+  stroke-width: 1.2;
+}
+
+.region-landmark-glyph {
+  fill: none;
+  stroke: rgba(252, 241, 214, 0.9);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.region-landmark-caption {
+  fill: #ecdcb7;
+  font-size: 7.4px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  paint-order: stroke;
+  stroke: rgba(7, 9, 10, 0.72);
+  stroke-width: 3px;
+}
+
+@keyframes worldAmbientDriftA {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.45; }
+  50% { transform: translate3d(6px, -5px, 0) scale(1.08); opacity: 0.78; }
+}
+
+@keyframes worldAmbientDriftB {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.42; }
+  50% { transform: translate3d(-7px, 6px, 0) scale(0.94); opacity: 0.72; }
+}
+
+@keyframes worldAmbientDriftC {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: 0.36; }
+  50% { transform: translate3d(4px, -7px, 0) scale(1.03); opacity: 0.64; }
+}
+
+@keyframes worldAmbientPulse {
+  0%, 100% { transform: scale(0.96); opacity: 0.34; }
+  50% { transform: scale(1.14); opacity: 0.78; }
 }
 
 .world-legend {
@@ -2339,6 +2532,11 @@ button {
   opacity: 0.22;
   filter: blur(1px);
   pointer-events: none;
+}
+
+.region-state-halo.selected,
+.region-state-halo.hovered {
+  filter: blur(0.5px) drop-shadow(0 0 12px rgba(247, 210, 130, 0.16));
 }
 
 .region-state-halo.surveying {

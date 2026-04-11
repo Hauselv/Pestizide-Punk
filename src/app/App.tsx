@@ -466,6 +466,202 @@ function getRegionHazardSummary(hazard: Record<string, number>) {
     .sort((left, right) => Number(right[1]) - Number(left[1]));
 }
 
+function getTerrainLandmarkLabel(terrainType: TerrainType) {
+  switch (terrainType) {
+    case "toxic-forest":
+      return "Canopy";
+    case "fungal-wetlands":
+      return "Spore Beds";
+    case "overgrown-ruins":
+      return "Ruins";
+    case "scavenger-scrapland":
+      return "Scrapyard";
+    case "chemical-waste":
+      return "Basin";
+    case "irradiated-badlands":
+      return "Hot Zone";
+    case "industrial-hulk":
+      return "Works";
+    case "mutant-nest":
+      return "Nest";
+    case "petro-marsh":
+      return "Oil Seeps";
+    case "steam-fissures":
+      return "Vent Field";
+    case "flooded-dam":
+      return "Dam";
+    case "algae-salt-flats":
+      return "Algae Beds";
+    case "ash-farmland":
+      return "Ash Fields";
+    default:
+      return "Frontier";
+  }
+}
+
+function renderTerrainLandmarkGlyph(terrainType: TerrainType) {
+  switch (terrainType) {
+    case "toxic-forest":
+      return (
+        <>
+          <path d="M -10 10 L -4 -8 L 2 10 Z" />
+          <path d="M -1 10 L 6 -5 L 13 10 Z" />
+          <path d="M 1 10 L 1 15" />
+        </>
+      );
+    case "fungal-wetlands":
+      return (
+        <>
+          <ellipse cx="-5" cy="2" rx="6" ry="4" />
+          <ellipse cx="5" cy="-1" rx="7" ry="5" />
+          <path d="M -5 5 L -5 14 M 5 4 L 5 14" />
+        </>
+      );
+    case "overgrown-ruins":
+      return (
+        <>
+          <rect x="-11" y="0" width="7" height="10" rx="1" />
+          <rect x="-2" y="-6" width="7" height="16" rx="1" />
+          <rect x="7" y="2" width="5" height="8" rx="1" />
+        </>
+      );
+    case "scavenger-scrapland":
+      return (
+        <>
+          <circle cx="-6" cy="2" r="4" />
+          <circle cx="5" cy="-3" r="5" />
+          <path d="M -12 10 L 10 -10 M -2 15 L 8 -15" />
+        </>
+      );
+    case "chemical-waste":
+    case "petro-marsh":
+      return (
+        <>
+          <path d="M 0 -12 C 6 -5 9 1 9 6 C 9 11 5 15 0 15 C -5 15 -9 11 -9 6 C -9 1 -6 -5 0 -12 Z" />
+          <path d="M -4 5 C -1 2 1 2 4 5" />
+        </>
+      );
+    case "irradiated-badlands":
+      return (
+        <>
+          <path d="M 0 -12 L 12 10 L -12 10 Z" />
+          <circle cx="0" cy="2" r="3.5" />
+        </>
+      );
+    case "industrial-hulk":
+      return (
+        <>
+          <rect x="-11" y="-4" width="8" height="14" rx="1" />
+          <rect x="1" y="-9" width="8" height="19" rx="1" />
+          <path d="M -7 -8 L -7 -4 M 5 -14 L 5 -9" />
+        </>
+      );
+    case "mutant-nest":
+      return (
+        <>
+          <ellipse cx="0" cy="4" rx="10" ry="7" />
+          <path d="M -9 -3 L -4 -11 M 0 -5 L 0 -14 M 9 -3 L 4 -11" />
+        </>
+      );
+    case "steam-fissures":
+      return (
+        <>
+          <path d="M -8 12 L -4 -8 L 0 12 Z" />
+          <path d="M 2 12 L 6 -12 L 10 12 Z" />
+          <path d="M -1 -12 C -5 -16 -4 -19 -1 -22 M 7 -15 C 3 -19 4 -22 7 -25" />
+        </>
+      );
+    case "flooded-dam":
+      return (
+        <>
+          <path d="M -10 -8 L -10 10 L 10 10 L 10 -8" />
+          <path d="M -6 -8 L -6 10 M 0 -8 L 0 10 M 6 -8 L 6 10" />
+          <path d="M -12 4 C -8 7 -4 7 0 4 C 4 1 8 1 12 4" />
+        </>
+      );
+    case "algae-salt-flats":
+      return (
+        <>
+          <path d="M -12 8 C -7 2 -2 2 3 8 C 7 12 10 12 12 8" />
+          <path d="M -10 -2 C -5 -8 0 -8 5 -2 C 8 1 10 1 12 -1" />
+          <circle cx="-6" cy="-6" r="2.5" />
+          <circle cx="4" cy="-8" r="2.5" />
+        </>
+      );
+    case "ash-farmland":
+      return (
+        <>
+          <path d="M -11 10 C -7 6 -3 6 1 10 C 5 14 8 14 11 10" />
+          <path d="M -11 2 C -7 -2 -3 -2 1 2 C 5 6 8 6 11 2" />
+          <path d="M -11 -6 C -7 -10 -3 -10 1 -6 C 5 -2 8 -2 11 -6" />
+        </>
+      );
+    default:
+      return (
+        <>
+          <circle cx="0" cy="0" r="10" />
+          <path d="M -10 0 H 10 M 0 -10 V 10" />
+        </>
+      );
+  }
+}
+
+function renderTerrainAmbientLayer(terrainType: TerrainType) {
+  switch (terrainType) {
+    case "toxic-forest":
+    case "fungal-wetlands":
+      return (
+        <>
+          <circle className="ambient-orb drift-a" cx="-14" cy="-10" r="8" />
+          <circle className="ambient-orb drift-b" cx="6" cy="-16" r="10" />
+          <circle className="ambient-orb drift-c" cx="18" cy="-4" r="7" />
+        </>
+      );
+    case "chemical-waste":
+    case "petro-marsh":
+    case "algae-salt-flats":
+      return (
+        <>
+          <path className="ambient-wave drift-a" d="M -26 4 C -18 -2 -12 -2 -4 4 C 3 9 10 9 18 4 C 23 1 28 1 32 5" />
+          <path className="ambient-wave drift-b" d="M -24 -8 C -15 -13 -8 -13 -1 -8 C 6 -3 13 -3 22 -8" />
+          <circle className="ambient-speck drift-c" cx="18" cy="-16" r="4" />
+        </>
+      );
+    case "steam-fissures":
+    case "irradiated-badlands":
+      return (
+        <>
+          <path className="ambient-plume drift-a" d="M -8 18 C -12 6 -10 -4 -4 -16" />
+          <path className="ambient-plume drift-b" d="M 6 18 C 0 4 2 -6 10 -20" />
+          <circle className="ambient-speck drift-c" cx="16" cy="-10" r="4" />
+        </>
+      );
+    case "mutant-nest":
+      return (
+        <>
+          <circle className="ambient-orb pulse-a" cx="-16" cy="-6" r="6" />
+          <circle className="ambient-orb pulse-b" cx="16" cy="-4" r="5" />
+          <path className="ambient-wave drift-c" d="M -18 10 C -8 4 2 4 14 10" />
+        </>
+      );
+    case "flooded-dam":
+    case "ash-farmland":
+      return (
+        <>
+          <path className="ambient-wave drift-a" d="M -28 8 C -20 2 -12 2 -4 8 C 4 14 12 14 22 8" />
+          <path className="ambient-wave drift-b" d="M -24 -6 C -14 -10 -6 -10 2 -6 C 10 -2 18 -2 26 -6" />
+        </>
+      );
+    default:
+      return (
+        <>
+          <circle className="ambient-orb drift-a" cx="-10" cy="-12" r="6" />
+          <circle className="ambient-orb drift-b" cx="12" cy="-6" r="5" />
+        </>
+      );
+  }
+}
+
 function canAffordFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow) {
   if (!flow) return true;
   return Object.entries(flow).every(([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0));
@@ -544,6 +740,20 @@ const regionCenters = Object.fromEntries(
   })
 ) as Record<string, { x: number; y: number }>;
 
+const regionGeometry = Object.fromEntries(
+  regionDefinitions.map((region) => {
+    const regionTiles = region.hexTileIds.map((tileId) => tileMap[tileId]).filter(Boolean);
+    const center = regionCenters[region.id];
+    const radius = regionTiles.reduce((max, tile) => {
+      const distance = Math.hypot(tile.center.x - center.x, tile.center.y - center.y);
+      return Math.max(max, distance);
+    }, HEX_SIZE * 1.05);
+    return [region.id, { center, radius: radius + HEX_SIZE * 0.9 }];
+  })
+) as Record<string, { center: { x: number; y: number }; radius: number }>;
+
+const cityCoreTile = worldGeometry.tiles.find((tile) => tile.isCityCore) ?? worldGeometry.tiles[0];
+
 function ResourceHud() {
   const resources = useGameStore((state) => state.resources);
   const pollution = useGameStore((state) => state.pollution);
@@ -584,6 +794,9 @@ function WorldMap() {
 
   const regionRuntimeMap = useMemo(() => Object.fromEntries(regions.map((region) => [region.id, region])), [regions]);
   const discoveredRegions = regions.filter((region) => region.discovered).length;
+  const focusRegionId = hoveredRegionId ?? selectedRegionId;
+  const focusRegionGeometry = focusRegionId ? regionGeometry[focusRegionId] : null;
+  const cityCenter = cityCoreTile.center;
 
   return (
     <section className="canvas-card world-card">
@@ -604,6 +817,14 @@ function WorldMap() {
               <stop offset="0%" stopColor="rgba(255, 192, 96, 0.26)" />
               <stop offset="100%" stopColor="rgba(13, 15, 18, 0)" />
             </radialGradient>
+            <pattern id="worldScanGrid" patternUnits="userSpaceOnUse" width="54" height="54">
+              <path d="M 54 0 L 0 0 0 54" fill="none" stroke="rgba(243, 215, 159, 0.05)" strokeWidth="1" />
+              <path d="M 27 0 L 27 54 M 0 27 L 54 27" fill="none" stroke="rgba(153, 212, 175, 0.035)" strokeWidth="0.8" />
+            </pattern>
+            <radialGradient id="worldVignette" cx="50%" cy="50%" r="68%">
+              <stop offset="58%" stopColor="rgba(0,0,0,0)" />
+              <stop offset="100%" stopColor="rgba(6, 8, 10, 0.46)" />
+            </radialGradient>
             {worldGeometry.tiles.map((tile) => {
               const asset = terrainAssetMap[tile.terrainType];
               const tileImage = getTerrainVariantImage(tile.terrainType, tile.decorVariant);
@@ -617,20 +838,48 @@ function WorldMap() {
             })}
           </defs>
           <rect width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldGlow)" />
+          <rect className="world-scan-grid" width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldScanGrid)" />
+          <rect className="world-vignette" width={worldGeometry.width} height={worldGeometry.height} fill="url(#worldVignette)" />
+          {focusRegionGeometry ? (
+            <path
+              className="world-route-line"
+              d={`M ${cityCenter.x} ${cityCenter.y} Q ${(cityCenter.x + focusRegionGeometry.center.x) / 2} ${Math.min(cityCenter.y, focusRegionGeometry.center.y) - HEX_SIZE * 0.75} ${focusRegionGeometry.center.x} ${focusRegionGeometry.center.y}`}
+            />
+          ) : null}
           {regionDefinitions.map((region) => {
             const runtime = regionRuntimeMap[region.id];
-            const labelCenter = regionCenters[region.id];
-            if (!runtime?.discovered || !labelCenter) return null;
+            const geometry = regionGeometry[region.id];
+            if (!runtime?.discovered || !geometry) return null;
+            const selected = selectedRegionId === region.id;
+            const hovered = hoveredRegionId === region.id;
+            const terrain = terrainAssetMap[region.primaryTerrain];
+            return (
+              <g key={`${region.id}-atmosphere`} className={["region-atmosphere", runtime.state, selected ? "selected" : "", hovered ? "hovered" : ""].filter(Boolean).join(" ")}>
+                <circle className="region-atmosphere-outer" cx={geometry.center.x} cy={geometry.center.y} r={geometry.radius * 1.08} style={{ fill: terrain.shadow }} />
+                <circle className="region-atmosphere-mid" cx={geometry.center.x} cy={geometry.center.y} r={geometry.radius * 0.84} style={{ fill: terrain.accent }} />
+                <circle
+                  className={["region-state-halo", runtime.state, selected ? "selected" : "", hovered ? "hovered" : ""].filter(Boolean).join(" ")}
+                  cx={geometry.center.x}
+                  cy={geometry.center.y}
+                  r={geometry.radius * 0.92}
+                />
+              </g>
+            );
+          })}
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
+            const geometry = regionGeometry[region.id];
+            if (!runtime?.discovered || !geometry) return null;
             const selected = selectedRegionId === region.id;
             const hovered = hoveredRegionId === region.id;
             return (
-              <circle
-                key={`${region.id}-halo`}
-                className={["region-state-halo", runtime.state, selected ? "selected" : "", hovered ? "hovered" : ""].filter(Boolean).join(" ")}
-                cx={labelCenter.x}
-                cy={labelCenter.y}
-                r={HEX_SIZE * (0.66 + region.hexTileIds.length * 0.14)}
-              />
+              <g
+                key={`${region.id}-ambient`}
+                className={`region-ambient ${selected ? "selected" : ""} ${hovered ? "hovered" : ""}`}
+                transform={`translate(${geometry.center.x}, ${geometry.center.y - HEX_SIZE * 0.28})`}
+              >
+                {renderTerrainAmbientLayer(region.primaryTerrain)}
+              </g>
             );
           })}
           {worldGeometry.tiles.map((tile) => {
@@ -673,11 +922,40 @@ function WorldMap() {
           })}
           {regionDefinitions.map((region) => {
             const runtime = regionRuntimeMap[region.id];
+            const geometry = regionGeometry[region.id];
+            if (!runtime?.discovered || !geometry) return null;
+            const selected = selectedRegionId === region.id;
+            const hovered = hoveredRegionId === region.id;
+            const terrain = terrainAssetMap[region.primaryTerrain];
+            return (
+              <g
+                key={`${region.id}-landmark`}
+                className={`region-landmark ${selected ? "selected" : ""} ${hovered ? "hovered" : ""}`}
+                transform={`translate(${geometry.center.x}, ${geometry.center.y - HEX_SIZE * 0.16})`}
+              >
+                <circle className="region-landmark-plinth" r={18} style={{ fill: terrain.shadow }} />
+                <circle className="region-landmark-core" r={14} style={{ fill: terrain.accent, stroke: terrain.stroke }} />
+                <g className="region-landmark-glyph">{renderTerrainLandmarkGlyph(region.primaryTerrain)}</g>
+                <text className="region-landmark-caption" x={0} y={31} textAnchor="middle">
+                  {getTerrainLandmarkLabel(region.primaryTerrain)}
+                </text>
+              </g>
+            );
+          })}
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
             const labelCenter = regionCenters[region.id];
             if (!runtime?.discovered || !labelCenter) return null;
+            const width = Math.max(104, region.name.length * 7.8);
             return (
-              <g key={`${region.id}-label`} className={`region-label ${selectedRegionId === region.id ? "selected" : ""}`}>
-                <text x={labelCenter.x} y={labelCenter.y + HEX_SIZE * 1.22} textAnchor="middle">{region.name}</text>
+              <g
+                key={`${region.id}-label`}
+                className={`region-label ${selectedRegionId === region.id ? "selected" : ""} ${hoveredRegionId === region.id ? "hovered" : ""}`}
+                transform={`translate(${labelCenter.x}, ${labelCenter.y + HEX_SIZE * 1.26})`}
+              >
+                <rect className="region-label-pill" x={-width / 2} y={-14} width={width} height={28} rx={14} />
+                <circle className="region-label-dot" cx={-width / 2 + 14} cy={0} r={4.2} />
+                <text x={0} y={4} textAnchor="middle">{region.name}</text>
               </g>
             );
           })}

@@ -103,3 +103,15 @@ px tsc --noEmit passed. Browser/dev-server QA could not run in this environment 
 - Crisis modal now surfaces a signal grid for severity, response window, and response count, and each response card shows compact outcome tags instead of only plain text cost lines.
 - Research dossier hero now carries a doctrine motif strip so branch identity reads earlier in the panel.
 - Verification for this pass: npx tsc --noEmit passed. Local server on http://127.0.0.1:4173 responded, but automated Playwright screenshot QA was blocked in this environment by a local permission error while creating the Playwright MCP cache directory.
+- Focused the latest polish pass on the world map itself instead of side panels.
+- Added a scan-grid layer, vignette, and a routed focus line from the city core toward the currently hovered/selected region.
+- Added soft biome atmosphere fields around discovered regions using terrain-driven shadow/accent colors, so territory reads more like a contaminated landscape instead of only discrete tiles.
+- Rebuilt region labels into framed map pills with state-aware highlighting and small signal dots for stronger readability over the playfield.
+- Verification for this pass: npx tsc --noEmit passed.
+- Added per-biome landmark markers directly onto the world map so regions are identifiable by icon language as well as terrain color.
+- Landmarks now sit on small plinths with terrain-tinted cores and custom SVG glyphs for forest, ruins, waste, nest, dam, vent, algae, ash-field and related biome families.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.
+- Added animated ambient environment layers to the world map.
+- Regions now get subtle terrain-specific motion overlays such as drifting toxic clouds, spore pockets, heat plumes, contaminated waves, and nest pulses.
+- The animation pass stays intentionally low-intensity so the board feels alive without compromising strategy readability.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.
