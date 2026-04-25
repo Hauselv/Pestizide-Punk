@@ -115,3 +115,15 @@ px tsc --noEmit passed. Browser/dev-server QA could not run in this environment 
 - Regions now get subtle terrain-specific motion overlays such as drifting toxic clouds, spore pockets, heat plumes, contaminated waves, and nest pulses.
 - The animation pass stays intentionally low-intensity so the board feels alive without compromising strategy readability.
 - Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.
+- Added large region-specific signature landmarks to the world map so each named place reads as a distinct site rather than only a biome cluster.
+- Regions like Toxic Forest, Scavenger Run, Flooded Dam, Steam Fissures, Petro Marsh, and Ash Farmland now get their own silhouette language above the hex field while keeping the smaller biome markers underneath.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully. Browser screenshot QA via Playwright MCP is still blocked in this environment by an EPERM cache-directory permission error.
+- Added a global day-phase and weather atmosphere layer to the world map that reacts to the live simulation instead of staying purely decorative.
+- The world board now shifts through dawn/day/dusk/night light veils and adds subtle crisis-tinted weather bands for toxic storms, swarm pressure, and contamination surges when those threats become imminent, pending, or active.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.
+- Added terrain transition seams between unlike neighboring hexes so biome borders read more like soft contaminated frontiers instead of hard texture cutoffs.
+- The transition pass computes shared hex edges for differing terrain or region neighbors and renders a blurred tint seam plus a thin terrain-tinted contour above the tile layer.
+- Verification for this pass: npx tsc --noEmit passed. A local server probe on http://127.0.0.1:4173 failed in this environment after the change, so live browser verification may require manually restarting the dev server.
+- Added a second layer of small, region-specific relic landmarks to the world map so named places carry more individual identity beyond their biome marker and large silhouette.
+- Each discovered region now gets a compact unique relic glyph with a subtle terrain-tinted backplate, offset deterministically around the region center to avoid stacking directly on the main signature.
+- Verification for this pass: npx tsc --noEmit passed. Dev-server/browser verification is blocked in this environment by the recurring Vite/esbuild spawn EPERM startup error.

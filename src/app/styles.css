@@ -659,9 +659,150 @@ button {
 }
 
 .world-svg {
+  position: relative;
+  z-index: 1;
   width: 100%;
   aspect-ratio: 1.12 / 1;
   display: block;
+}
+
+.world-phase-overlay,
+.world-weather-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.world-phase-overlay {
+  z-index: 2;
+  opacity: 0.42;
+  mix-blend-mode: screen;
+  transition: opacity 220ms ease, background 220ms ease;
+}
+
+.world-phase-overlay.dawn {
+  background:
+    radial-gradient(circle at 38% 20%, rgba(255, 214, 154, 0.2), transparent 34%),
+    linear-gradient(180deg, rgba(116, 160, 150, 0.08), rgba(11, 18, 18, 0.02));
+}
+
+.world-phase-overlay.day {
+  background:
+    radial-gradient(circle at 42% 16%, rgba(255, 231, 180, 0.22), transparent 36%),
+    linear-gradient(180deg, rgba(149, 196, 170, 0.07), rgba(14, 19, 18, 0.02));
+}
+
+.world-phase-overlay.dusk {
+  background:
+    radial-gradient(circle at 60% 18%, rgba(255, 188, 122, 0.2), transparent 34%),
+    linear-gradient(180deg, rgba(95, 132, 138, 0.08), rgba(22, 13, 16, 0.08));
+}
+
+.world-phase-overlay.night {
+  background:
+    radial-gradient(circle at 54% 14%, rgba(102, 140, 170, 0.16), transparent 28%),
+    linear-gradient(180deg, rgba(9, 14, 24, 0.16), rgba(2, 6, 10, 0.22));
+  opacity: 0.5;
+}
+
+.world-weather-overlay {
+  z-index: 3;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.world-weather-overlay.idle {
+  opacity: 0.14;
+}
+
+.world-weather-overlay.forecast {
+  opacity: 0.3;
+}
+
+.world-weather-overlay.pending,
+.world-weather-overlay.active {
+  opacity: 0.54;
+}
+
+.weather-band,
+.weather-particles {
+  position: absolute;
+  inset: -12%;
+  pointer-events: none;
+}
+
+.weather-band {
+  mix-blend-mode: screen;
+  filter: blur(14px);
+}
+
+.weather-particles {
+  mix-blend-mode: screen;
+  opacity: 0.55;
+}
+
+.world-weather-overlay.calm .weather-band,
+.world-weather-overlay.calm .weather-particles {
+  opacity: 0;
+}
+
+.world-weather-overlay.storm .band-a {
+  background: linear-gradient(120deg, transparent 18%, rgba(124, 196, 206, 0.08) 42%, rgba(172, 244, 206, 0.12) 52%, transparent 72%);
+  animation: worldWeatherSlideA 16s linear infinite;
+}
+
+.world-weather-overlay.storm .band-b {
+  background: linear-gradient(300deg, transparent 12%, rgba(109, 175, 182, 0.08) 40%, rgba(214, 249, 231, 0.08) 54%, transparent 76%);
+  animation: worldWeatherSlideB 20s linear infinite;
+}
+
+.world-weather-overlay.storm .weather-particles {
+  background:
+    radial-gradient(circle at 22% 34%, rgba(189, 239, 218, 0.14), transparent 0.9%),
+    radial-gradient(circle at 66% 52%, rgba(166, 224, 214, 0.12), transparent 1.1%),
+    radial-gradient(circle at 80% 20%, rgba(212, 246, 226, 0.14), transparent 1%),
+    radial-gradient(circle at 45% 76%, rgba(118, 199, 176, 0.14), transparent 1.1%);
+  animation: worldWeatherFlicker 9s ease-in-out infinite;
+}
+
+.world-weather-overlay.swarm .band-a {
+  background: linear-gradient(112deg, transparent 16%, rgba(226, 196, 112, 0.08) 38%, rgba(255, 224, 129, 0.14) 49%, transparent 66%);
+  animation: worldWeatherSlideA 18s linear infinite;
+}
+
+.world-weather-overlay.swarm .band-b {
+  background: linear-gradient(292deg, transparent 16%, rgba(162, 142, 80, 0.08) 42%, rgba(236, 192, 93, 0.12) 52%, transparent 70%);
+  animation: worldWeatherSlideB 22s linear infinite;
+}
+
+.world-weather-overlay.swarm .weather-particles {
+  background:
+    radial-gradient(circle at 18% 28%, rgba(255, 212, 118, 0.16), transparent 0.8%),
+    radial-gradient(circle at 36% 46%, rgba(219, 184, 91, 0.16), transparent 0.8%),
+    radial-gradient(circle at 62% 32%, rgba(255, 226, 132, 0.14), transparent 0.8%),
+    radial-gradient(circle at 78% 58%, rgba(255, 206, 101, 0.16), transparent 0.9%),
+    radial-gradient(circle at 54% 78%, rgba(226, 188, 96, 0.15), transparent 0.8%);
+  animation: worldWeatherFlicker 7.8s ease-in-out infinite;
+}
+
+.world-weather-overlay.contamination .band-a {
+  background: linear-gradient(118deg, transparent 14%, rgba(135, 216, 148, 0.07) 38%, rgba(132, 213, 94, 0.11) 48%, rgba(201, 120, 72, 0.08) 58%, transparent 74%);
+  animation: worldWeatherSlideA 17s linear infinite;
+}
+
+.world-weather-overlay.contamination .band-b {
+  background: linear-gradient(298deg, transparent 14%, rgba(196, 112, 72, 0.07) 40%, rgba(166, 212, 132, 0.1) 51%, transparent 70%);
+  animation: worldWeatherSlideB 21s linear infinite;
+}
+
+.world-weather-overlay.contamination .weather-particles {
+  background:
+    radial-gradient(circle at 25% 26%, rgba(161, 235, 145, 0.15), transparent 0.9%),
+    radial-gradient(circle at 44% 62%, rgba(236, 142, 101, 0.14), transparent 0.9%),
+    radial-gradient(circle at 68% 40%, rgba(171, 231, 114, 0.14), transparent 0.9%),
+    radial-gradient(circle at 82% 70%, rgba(216, 118, 85, 0.14), transparent 1%);
+  animation: worldWeatherFlicker 8.6s ease-in-out infinite;
 }
 
 .world-scan-grid {
@@ -682,6 +823,34 @@ button {
   stroke-dasharray: 7 8;
   filter: drop-shadow(0 0 8px rgba(247, 205, 122, 0.18));
   pointer-events: none;
+}
+
+.terrain-transition {
+  pointer-events: none;
+  opacity: 0.54;
+  transition: opacity 160ms ease;
+}
+
+.terrain-transition.selected,
+.terrain-transition.hovered {
+  opacity: 0.92;
+}
+
+.terrain-transition-shadow,
+.terrain-transition-stroke {
+  fill: none;
+  stroke-linecap: round;
+}
+
+.terrain-transition-shadow {
+  stroke-width: 8;
+  opacity: 0.18;
+  filter: blur(6px);
+}
+
+.terrain-transition-stroke {
+  stroke-width: 1.5;
+  opacity: 0.38;
 }
 
 .region-atmosphere {
@@ -714,6 +883,74 @@ button {
 .region-ambient.selected,
 .region-ambient.hovered {
   opacity: 0.78;
+}
+
+.region-signature-landmark {
+  pointer-events: none;
+  opacity: 0.82;
+  filter: drop-shadow(0 16px 24px rgba(0, 0, 0, 0.34));
+  transition: transform 180ms ease, opacity 180ms ease, filter 180ms ease;
+}
+
+.region-signature-landmark.selected,
+.region-signature-landmark.hovered {
+  opacity: 1;
+  transform: scale(1.05);
+  filter: drop-shadow(0 18px 28px rgba(0, 0, 0, 0.42));
+}
+
+.region-signature-aura {
+  opacity: 0.18;
+  filter: blur(8px);
+}
+
+.region-signature-plinth {
+  opacity: 0.28;
+}
+
+.region-signature-glyph {
+  fill: none;
+  stroke: rgba(248, 236, 208, 0.74);
+  stroke-width: 2.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.region-signature-landmark.selected .region-signature-glyph,
+.region-signature-landmark.hovered .region-signature-glyph {
+  stroke: rgba(255, 229, 176, 0.94);
+}
+
+.region-relic-landmark {
+  pointer-events: none;
+  opacity: 0.74;
+  filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.32));
+  transition: opacity 160ms ease, transform 160ms ease, filter 160ms ease;
+}
+
+.region-relic-landmark.selected,
+.region-relic-landmark.hovered {
+  opacity: 1;
+  transform: scale(1.08);
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.42));
+}
+
+.region-relic-backplate {
+  opacity: 0.5;
+  stroke-width: 1.1;
+}
+
+.region-relic-glyph {
+  fill: none;
+  stroke: rgba(245, 231, 197, 0.82);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.region-relic-landmark.selected .region-relic-glyph,
+.region-relic-landmark.hovered .region-relic-glyph {
+  stroke: rgba(255, 217, 143, 0.96);
 }
 
 .ambient-orb,
@@ -949,6 +1186,23 @@ button {
 @keyframes worldAmbientPulse {
   0%, 100% { transform: scale(0.96); opacity: 0.34; }
   50% { transform: scale(1.14); opacity: 0.78; }
+}
+
+@keyframes worldWeatherSlideA {
+  0% { transform: translate3d(-6%, -2%, 0) rotate(-2deg); }
+  50% { transform: translate3d(4%, 1%, 0) rotate(0.5deg); }
+  100% { transform: translate3d(10%, 4%, 0) rotate(2deg); }
+}
+
+@keyframes worldWeatherSlideB {
+  0% { transform: translate3d(7%, -4%, 0) rotate(2deg); }
+  50% { transform: translate3d(-3%, 2%, 0) rotate(-1deg); }
+  100% { transform: translate3d(-10%, 5%, 0) rotate(-2deg); }
+}
+
+@keyframes worldWeatherFlicker {
+  0%, 100% { opacity: 0.26; transform: translate3d(0, 0, 0) scale(1); }
+  50% { opacity: 0.62; transform: translate3d(1%, -1%, 0) scale(1.02); }
 }
 
 .world-legend {
@@ -1399,6 +1653,7 @@ button {
     radial-gradient(circle at 18% 18%, rgba(115, 184, 135, 0.08), transparent 20%),
     linear-gradient(180deg, rgba(255, 221, 156, 0.05), transparent 18%);
   pointer-events: none;
+  z-index: 4;
 }
 
 .world-svg {

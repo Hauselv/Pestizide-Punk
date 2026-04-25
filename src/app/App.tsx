@@ -12,6 +12,7 @@ import type {
   BuildingDefinition,
   BuildingInstance,
   DoctrineTag,
+  EventId,
   Expedition,
   ExpeditionKind,
   HexCoord,
@@ -235,19 +236,25 @@ function hexToPixel(coord: HexCoord) {
   };
 }
 
-function getHexPoints(center: { x: number; y: number }) {
-  const points: string[] = [];
-  for (let index = 0; index < 6; index += 1) {
+function getHexVertices(center: { x: number; y: number }) {
+  return Array.from({ length: 6 }, (_, index) => {
     const angle = ((60 * index - 30) * Math.PI) / 180;
-    points.push(`${center.x + HEX_SIZE * Math.cos(angle)},${center.y + HEX_SIZE * Math.sin(angle)}`);
-  }
-  return points.join(" ");
+    return {
+      x: center.x + HEX_SIZE * Math.cos(angle),
+      y: center.y + HEX_SIZE * Math.sin(angle)
+    };
+  });
+}
+
+function getHexPoints(center: { x: number; y: number }) {
+  return getHexVertices(center).map((point) => `${point.x},${point.y}`).join(" ");
 }
 
 const worldGeometry = (() => {
   const projected = worldHexes.map((tile) => {
     const center = hexToPixel(tile);
-    return { ...tile, center, points: getHexPoints(center) };
+    const vertices = getHexVertices(center);
+    return { ...tile, center, vertices, points: vertices.map((point) => `${point.x},${point.y}`).join(" ") };
   });
 
   const bounds = projected.reduce(
@@ -267,13 +274,48 @@ const worldGeometry = (() => {
 
   const normalized = projected.map((tile) => {
     const center = { x: tile.center.x + offsetX, y: tile.center.y + offsetY };
-    return { ...tile, center, points: getHexPoints(center) };
+    const vertices = getHexVertices(center);
+    return { ...tile, center, vertices, points: vertices.map((point) => `${point.x},${point.y}`).join(" ") };
   });
 
   return { width, height, tiles: normalized };
 })();
 
-const tileMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [tile.id, tile])) as Record<string, HexTileDefinition & { center: { x: number; y: number }; points: string }>;
+const tileMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [tile.id, tile])) as Record<string, HexTileDefinition & { center: { x: number; y: number }; points: string; vertices: Array<{ x: number; y: number }> }>;
+
+const worldTransitionEdges = (() => {
+  const neighborChecks = [
+    { q: 1, r: 0, edge: [0, 1] as const },
+    { q: 1, r: -1, edge: [5, 0] as const },
+    { q: 0, r: -1, edge: [4, 5] as const }
+  ];
+  const coordMap = Object.fromEntries(worldGeometry.tiles.map((tile) => [`${tile.q},${tile.r}`, tile])) as Record<
+    string,
+    HexTileDefinition & { center: { x: number; y: number }; points: string; vertices: Array<{ x: number; y: number }> }
+  >;
+
+  return worldGeometry.tiles.flatMap((tile) => {
+    if (tile.isCityCore) return [];
+
+    return neighborChecks.flatMap((direction) => {
+      const neighbor = coordMap[`${tile.q + direction.q},${tile.r + direction.r}`];
+      if (!neighbor || neighbor.isCityCore) return [];
+      if (neighbor.terrainType === tile.terrainType && neighbor.regionId === tile.regionId) return [];
+
+      const [startIndex, endIndex] = direction.edge;
+      return [{
+        id: `${tile.id}-${neighbor.id}`,
+        fromTileId: tile.id,
+        toTileId: neighbor.id,
+        fromRegionId: tile.regionId,
+        toRegionId: neighbor.regionId,
+        terrainType: tile.terrainType,
+        start: tile.vertices[startIndex],
+        end: tile.vertices[endIndex]
+      }];
+    });
+  });
+})();
 
 function getResearchBranchColor(branch: string) {
   return RESEARCH_BRANCH_COLORS[branch] ?? "#d9b474";
@@ -662,6 +704,270 @@ function renderTerrainAmbientLayer(terrainType: TerrainType) {
   }
 }
 
+function renderRegionSignatureGlyph(regionId: string) {
+  switch (regionId) {
+    case "toxic-forest":
+      return (
+        <>
+          <path d="M 0 18 C -11 8 -13 -2 -9 -13 C -6 -22 0 -28 0 -28 C 0 -28 6 -22 9 -13 C 13 -2 11 8 0 18 Z" />
+          <path d="M 0 18 L 0 31" />
+          <path d="M -14 -4 C -5 -12 5 -12 14 -4" />
+          <path d="M -9 4 C -3 -1 3 -1 9 4" />
+        </>
+      );
+    case "scavenger-run":
+      return (
+        <>
+          <path d="M -24 22 H 24" />
+          <path d="M -18 22 L -9 -18 H 7 L 15 22" />
+          <path d="M -12 4 H 12" />
+          <path d="M -20 12 H 18" />
+          <path d="M 1 -18 L 10 -26" />
+        </>
+      );
+    case "fungal-wetlands":
+      return (
+        <>
+          <path d="M -14 28 C -16 10 -13 0 -8 -12" />
+          <path d="M 2 28 C -1 10 1 -2 6 -18" />
+          <path d="M 16 28 C 13 13 15 3 20 -10" />
+          <path d="M -16 -8 C -8 -18 1 -18 8 -8" />
+          <path d="M -1 -15 C 6 -24 15 -24 22 -15" />
+        </>
+      );
+    case "overgrown-ruins":
+      return (
+        <>
+          <path d="M -22 24 L -4 -18 L 18 24" />
+          <path d="M -12 6 H 8" />
+          <path d="M -4 -18 L 8 -6" />
+          <path d="M -16 22 C -12 7 -9 -1 -2 -10" />
+        </>
+      );
+    case "waste-basin":
+      return (
+        <>
+          <rect x="-20" y="2" width="16" height="18" rx="3" />
+          <rect x="-1" y="-8" width="16" height="28" rx="3" />
+          <path d="M -12 2 V -8 M 7 -8 V -18" />
+          <path d="M -22 20 C -14 14 -6 14 2 20 C 10 26 18 26 24 20" />
+        </>
+      );
+    case "mutant-nest":
+      return (
+        <>
+          <ellipse cx="0" cy="12" rx="16" ry="10" />
+          <path d="M -10 4 L -16 -10 M -2 1 L -3 -16 M 8 4 L 16 -11" />
+          <path d="M -8 16 C -2 11 2 11 8 16" />
+        </>
+      );
+    case "irradiated-fields":
+      return (
+        <>
+          <path d="M 0 -24 L 14 24 L -14 24 Z" />
+          <path d="M -20 10 H -6 M 7 10 H 20" />
+          <path d="M 0 -8 V 24" />
+          <path d="M -7 3 H 7" />
+        </>
+      );
+    case "industrial-hulk":
+      return (
+        <>
+          <rect x="-22" y="4" width="11" height="18" rx="1.5" />
+          <rect x="-6" y="-8" width="12" height="30" rx="1.5" />
+          <rect x="10" y="-16" width="10" height="38" rx="1.5" />
+          <path d="M -16 4 V -4 M 0 -8 V -18 M 15 -16 V -28" />
+          <path d="M -22 22 H 20" />
+        </>
+      );
+    case "petro-marsh":
+      return (
+        <>
+          <path d="M -18 20 H 20" />
+          <path d="M -10 20 L 4 -6 L 16 20" />
+          <path d="M 4 -6 L 13 -11" />
+          <path d="M -8 9 H 9" />
+          <path d="M -20 27 C -12 21 -4 21 4 27 C 12 31 18 31 24 26" />
+        </>
+      );
+    case "steam-fissures":
+      return (
+        <>
+          <path d="M -18 24 L -8 -14 L 1 24 Z" />
+          <path d="M 4 24 L 15 -20 L 24 24 Z" />
+          <path d="M -8 -14 C -13 -20 -12 -25 -8 -29" />
+          <path d="M 15 -20 C 10 -27 11 -32 16 -36" />
+        </>
+      );
+    case "flooded-dam":
+      return (
+        <>
+          <path d="M -24 -10 L -24 22 H 24 V -10" />
+          <path d="M -10 -10 V 22 M 4 -10 V 22" />
+          <path d="M -28 8 C -20 15 -10 15 0 8 C 9 1 18 1 28 8" />
+          <path d="M -24 -10 L 24 -10" />
+        </>
+      );
+    case "algae-salt-flats":
+      return (
+        <>
+          <ellipse cx="-11" cy="8" rx="10" ry="5.5" />
+          <ellipse cx="12" cy="1" rx="11" ry="6" />
+          <path d="M -20 23 C -11 15 -4 15 3 23 C 10 30 17 30 24 22" />
+          <path d="M -4 1 V -10 M 10 -7 V -18" />
+        </>
+      );
+    case "ash-farmland":
+      return (
+        <>
+          <path d="M -23 22 C -14 16 -6 16 2 22 C 9 28 16 28 23 22" />
+          <path d="M -20 10 C -11 4 -3 4 5 10 C 12 16 18 16 24 10" />
+          <path d="M -17 -2 C -8 -8 0 -8 8 -2 C 15 4 21 4 26 -1" />
+          <path d="M -6 -8 V 2 M 8 -14 V -3" />
+        </>
+      );
+    default:
+      return (
+        <>
+          <circle cx="0" cy="0" r="14" />
+          <path d="M -16 0 H 16 M 0 -16 V 16" />
+        </>
+      );
+  }
+}
+
+function renderRegionRelicGlyph(regionId: string) {
+  switch (regionId) {
+    case "toxic-forest":
+      return (
+        <>
+          <path d="M -12 11 C -5 5 4 5 12 11" />
+          <circle cx="-8" cy="2" r="4" />
+          <circle cx="4" cy="-5" r="5" />
+          <path d="M 4 0 V 12 M -8 6 V 12" />
+        </>
+      );
+    case "scavenger-run":
+      return (
+        <>
+          <rect x="-13" y="-5" width="26" height="10" rx="2" />
+          <path d="M -10 5 L -14 13 M 10 5 L 14 13" />
+          <path d="M -8 -5 L -3 -12 H 8" />
+        </>
+      );
+    case "fungal-wetlands":
+      return (
+        <>
+          <path d="M -15 12 C -7 7 7 7 15 12" />
+          <path d="M -7 8 V -5 M 6 8 V -9" />
+          <path d="M -13 -4 C -7 -12 0 -12 5 -4" />
+          <path d="M 1 -8 C 8 -16 15 -16 18 -8" />
+        </>
+      );
+    case "overgrown-ruins":
+      return (
+        <>
+          <path d="M -14 13 L -6 -10 H 8 L 14 13" />
+          <path d="M -7 1 H 9" />
+          <path d="M -10 13 C -8 3 -4 -4 2 -9" />
+        </>
+      );
+    case "waste-basin":
+      return (
+        <>
+          <rect x="-14" y="-8" width="10" height="19" rx="2" />
+          <rect x="2" y="-12" width="11" height="23" rx="2" />
+          <path d="M -16 13 C -9 8 -2 8 5 13 C 10 17 15 17 18 13" />
+        </>
+      );
+    case "mutant-nest":
+      return (
+        <>
+          <ellipse cx="0" cy="8" rx="13" ry="7" />
+          <path d="M -10 3 L -15 -8 M 0 1 V -13 M 10 3 L 15 -8" />
+          <circle cx="0" cy="7" r="3" />
+        </>
+      );
+    case "irradiated-fields":
+      return (
+        <>
+          <path d="M 0 -15 L 12 13 H -12 Z" />
+          <circle cx="0" cy="3" r="3.5" />
+          <path d="M -16 13 H 16" />
+        </>
+      );
+    case "industrial-hulk":
+      return (
+        <>
+          <rect x="-13" y="-3" width="8" height="16" rx="1" />
+          <rect x="2" y="-12" width="9" height="25" rx="1" />
+          <path d="M -14 13 H 14 M -9 -3 V -10 M 7 -12 V -18" />
+        </>
+      );
+    case "petro-marsh":
+      return (
+        <>
+          <path d="M -13 13 H 15" />
+          <path d="M -7 13 L 3 -9 L 12 13" />
+          <path d="M 3 -9 L 12 -13" />
+          <path d="M -15 18 C -8 14 -2 14 5 18 C 10 21 15 21 19 17" />
+        </>
+      );
+    case "steam-fissures":
+      return (
+        <>
+          <path d="M -12 14 L -5 -11 L 2 14 Z" />
+          <path d="M 5 14 L 11 -15 L 17 14 Z" />
+          <path d="M -5 -11 C -10 -15 -9 -19 -5 -22 M 11 -15 C 7 -20 8 -23 12 -26" />
+        </>
+      );
+    case "flooded-dam":
+      return (
+        <>
+          <path d="M -16 -7 V 12 H 16 V -7" />
+          <path d="M -6 -7 V 12 M 5 -7 V 12" />
+          <path d="M -18 6 C -12 11 -5 11 1 6 C 7 1 13 1 19 6" />
+        </>
+      );
+    case "algae-salt-flats":
+      return (
+        <>
+          <ellipse cx="-7" cy="5" rx="8" ry="4" />
+          <ellipse cx="9" cy="-2" rx="8" ry="4.5" />
+          <path d="M -15 14 C -8 9 -2 9 4 14 C 10 18 15 18 19 13" />
+        </>
+      );
+    case "ash-farmland":
+      return (
+        <>
+          <path d="M -16 13 C -9 8 -3 8 3 13 C 9 18 14 18 18 13" />
+          <path d="M -14 3 C -7 -2 -1 -2 5 3 C 11 8 16 8 19 3" />
+          <path d="M -5 -7 V 6 M 8 -11 V 2" />
+        </>
+      );
+    default:
+      return (
+        <>
+          <rect x="-10" y="-10" width="20" height="20" rx="3" />
+          <path d="M -7 0 H 7 M 0 -7 V 7" />
+        </>
+      );
+  }
+}
+
+function getWorldWeatherTone(eventId: EventId | null) {
+  switch (eventId) {
+    case "toxic-storm":
+      return "storm";
+    case "swarm-raid":
+      return "swarm";
+    case "contamination-surge":
+      return "contamination";
+    default:
+      return "calm";
+  }
+}
+
 function canAffordFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow) {
   if (!flow) return true;
   return Object.entries(flow).every(([resourceId, amount]) => resources[resourceId as ResourceId] >= Number(amount ?? 0));
@@ -752,6 +1058,14 @@ const regionGeometry = Object.fromEntries(
   })
 ) as Record<string, { center: { x: number; y: number }; radius: number }>;
 
+const regionRelicOffsets = Object.fromEntries(
+  regionDefinitions.map((region, index) => {
+    const angle = (index * 137.5 * Math.PI) / 180;
+    const distance = HEX_SIZE * (0.46 + (index % 3) * 0.1);
+    return [region.id, { x: Math.cos(angle) * distance, y: Math.sin(angle) * distance * 0.72 }];
+  })
+) as Record<string, { x: number; y: number }>;
+
 const cityCoreTile = worldGeometry.tiles.find((tile) => tile.isCityCore) ?? worldGeometry.tiles[0];
 
 function ResourceHud() {
@@ -790,6 +1104,11 @@ function WorldMap() {
   const selectedRegionId = useGameStore((state) => state.selectedRegionId);
   const selectRegion = useGameStore((state) => state.selectRegion);
   const setView = useGameStore((state) => state.setView);
+  const dayPhase = useGameStore((state) => state.dayPhase);
+  const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
+  const activeEvent = useGameStore((state) => state.activeEvent);
+  const pendingEvent = useGameStore((state) => state.pendingEvent);
+  const eventForecast = useGameStore((state) => state.eventForecast);
   const [hoveredRegionId, setHoveredRegionId] = useState<string | null>(null);
 
   const regionRuntimeMap = useMemo(() => Object.fromEntries(regions.map((region) => [region.id, region])), [regions]);
@@ -797,6 +1116,12 @@ function WorldMap() {
   const focusRegionId = hoveredRegionId ?? selectedRegionId;
   const focusRegionGeometry = focusRegionId ? regionGeometry[focusRegionId] : null;
   const cityCenter = cityCoreTile.center;
+  const imminentForecast = !pendingEvent && !activeEvent
+    ? eventForecast.find((event) => event.startsAt - elapsedSeconds <= 42)
+    : null;
+  const worldWeatherEventId = pendingEvent?.id ?? activeEvent?.id ?? imminentForecast?.id ?? null;
+  const worldWeatherTone = getWorldWeatherTone(worldWeatherEventId);
+  const weatherStateClass = pendingEvent ? "pending" : activeEvent ? "active" : imminentForecast ? "forecast" : "idle";
 
   return (
     <section className="canvas-card world-card">
@@ -810,7 +1135,13 @@ function WorldMap() {
           <button className="ghost-button" onClick={() => setView("city")}>Enter City</button>
         </div>
       </div>
-      <div className="world-frame">
+      <div className={`world-frame ${dayPhase} weather-${worldWeatherTone} weather-${weatherStateClass}`}>
+        <div className={`world-phase-overlay ${dayPhase}`} />
+        <div className={`world-weather-overlay ${worldWeatherTone} ${weatherStateClass}`}>
+          <span className="weather-band band-a" />
+          <span className="weather-band band-b" />
+          <span className="weather-particles" />
+        </div>
         <svg className="world-svg" viewBox={`0 0 ${worldGeometry.width} ${worldGeometry.height}`} role="img" aria-label="Hex world overview map">
           <defs>
             <radialGradient id="worldGlow" cx="50%" cy="44%" r="65%">
@@ -917,6 +1248,60 @@ function WorldMap() {
                     />
                   </g>
                 ) : null}
+              </g>
+            );
+          })}
+          {worldTransitionEdges.map((edge) => {
+            const fromRuntime = edge.fromRegionId ? regionRuntimeMap[edge.fromRegionId] : null;
+            const toRuntime = edge.toRegionId ? regionRuntimeMap[edge.toRegionId] : null;
+            const discovered = Boolean(fromRuntime?.discovered && toRuntime?.discovered);
+            if (!discovered) return null;
+
+            const selected = (edge.fromRegionId && selectedRegionId === edge.fromRegionId) || (edge.toRegionId && selectedRegionId === edge.toRegionId);
+            const hovered = (edge.fromRegionId && hoveredRegionId === edge.fromRegionId) || (edge.toRegionId && hoveredRegionId === edge.toRegionId);
+            const terrain = terrainAssetMap[edge.terrainType];
+            return (
+              <g key={edge.id} className={`terrain-transition ${selected ? "selected" : ""} ${hovered ? "hovered" : ""}`}>
+                <line className="terrain-transition-shadow" x1={edge.start.x} y1={edge.start.y} x2={edge.end.x} y2={edge.end.y} style={{ stroke: terrain.shadow }} />
+                <line className="terrain-transition-stroke" x1={edge.start.x} y1={edge.start.y} x2={edge.end.x} y2={edge.end.y} style={{ stroke: terrain.stroke }} />
+              </g>
+            );
+          })}
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
+            const geometry = regionGeometry[region.id];
+            if (!runtime?.discovered || !geometry) return null;
+            const selected = selectedRegionId === region.id;
+            const hovered = hoveredRegionId === region.id;
+            const terrain = terrainAssetMap[region.primaryTerrain];
+            return (
+              <g
+                key={`${region.id}-signature`}
+                className={`region-signature-landmark ${selected ? "selected" : ""} ${hovered ? "hovered" : ""}`}
+                transform={`translate(${geometry.center.x}, ${geometry.center.y - HEX_SIZE * 0.88})`}
+              >
+                <ellipse className="region-signature-aura" rx={34} ry={16} style={{ fill: terrain.shadow }} />
+                <path className="region-signature-plinth" d="M -26 27 C -18 21 -10 20 0 20 C 10 20 18 21 26 27 C 18 31 10 33 0 33 C -10 33 -18 31 -26 27 Z" style={{ fill: terrain.accent }} />
+                <g className="region-signature-glyph">{renderRegionSignatureGlyph(region.id)}</g>
+              </g>
+            );
+          })}
+          {regionDefinitions.map((region) => {
+            const runtime = regionRuntimeMap[region.id];
+            const geometry = regionGeometry[region.id];
+            const offset = regionRelicOffsets[region.id] ?? { x: HEX_SIZE * 0.42, y: HEX_SIZE * 0.16 };
+            if (!runtime?.discovered || !geometry) return null;
+            const selected = selectedRegionId === region.id;
+            const hovered = hoveredRegionId === region.id;
+            const terrain = terrainAssetMap[region.primaryTerrain];
+            return (
+              <g
+                key={`${region.id}-relic`}
+                className={`region-relic-landmark ${selected ? "selected" : ""} ${hovered ? "hovered" : ""}`}
+                transform={`translate(${geometry.center.x + offset.x}, ${geometry.center.y + offset.y})`}
+              >
+                <circle className="region-relic-backplate" r={17} style={{ fill: terrain.shadow, stroke: terrain.stroke }} />
+                <g className="region-relic-glyph">{renderRegionRelicGlyph(region.id)}</g>
               </g>
             );
           })}
