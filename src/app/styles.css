@@ -171,6 +171,126 @@ button {
   padding: 0.6rem 0.9rem;
 }
 
+.hero-picker-list,
+.hero-roster-grid,
+.candidate-grid {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.hero-picker-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hero-picker,
+.hero-card,
+.candidate-card,
+.mission-preview {
+  border: 1px solid rgba(224, 181, 96, 0.18);
+  background: linear-gradient(180deg, rgba(45, 48, 39, 0.94), rgba(25, 28, 23, 0.94));
+  color: #f8efdc;
+  border-radius: 12px;
+}
+
+.hero-picker {
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+}
+
+.hero-picker.selected {
+  border-color: rgba(142, 203, 121, 0.7);
+  background: linear-gradient(180deg, rgba(48, 79, 55, 0.96), rgba(28, 46, 34, 0.96));
+}
+
+.mission-preview {
+  padding: 0.7rem;
+}
+
+.heroes-shell {
+  display: grid;
+  gap: 1rem;
+}
+
+.hero-roster-grid {
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+.hero-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.85rem;
+}
+
+.hero-card.assigned {
+  border-color: rgba(135, 183, 201, 0.42);
+}
+
+.hero-card.injured,
+.hero-card.recovering {
+  border-color: rgba(201, 119, 99, 0.62);
+}
+
+.hero-card-head,
+.hero-status-row,
+.compact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.hero-card-head strong {
+  display: block;
+  font-size: 1.05rem;
+}
+
+.hero-card-head em {
+  font-style: normal;
+  color: #f0c269;
+}
+
+.hero-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.hero-skill-grid div {
+  padding: 0.45rem;
+  border-radius: 10px;
+  background: rgba(10, 12, 10, 0.32);
+}
+
+.hero-inventory {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.hero-inventory span {
+  padding: 0.35rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(135, 183, 201, 0.12);
+  color: #d9e5df;
+  font-size: 0.75rem;
+}
+
+.candidate-grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.candidate-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.8rem;
+  text-align: left;
+}
+
+.candidate-card:disabled,
+.hero-picker:disabled {
+  opacity: 0.5;
+}
+
 .canvas-card,
 .tutorial-panel,
 .detail-panel {
@@ -1064,6 +1184,63 @@ button {
 
 .hex-tile.selected .hex-danger {
   opacity: 0.9;
+}
+
+.hex-terrain-detail {
+  pointer-events: none;
+  fill: none;
+  stroke: rgba(244, 232, 199, 0.28);
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.58;
+  mix-blend-mode: screen;
+  filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.16));
+}
+
+.hex-terrain-detail circle,
+.hex-terrain-detail ellipse,
+.hex-terrain-detail rect {
+  fill: rgba(244, 232, 199, 0.08);
+}
+
+.hex-terrain-detail.forest,
+.hex-terrain-detail.wetlands,
+.hex-terrain-detail.algae {
+  stroke: rgba(181, 242, 173, 0.32);
+}
+
+.hex-terrain-detail.waste,
+.hex-terrain-detail.fissures,
+.hex-terrain-detail.farmland {
+  stroke: rgba(255, 196, 122, 0.3);
+}
+
+.hex-terrain-detail.industrial,
+.hex-terrain-detail.scrap,
+.hex-terrain-detail.ruins {
+  stroke: rgba(225, 214, 177, 0.28);
+}
+
+.hex-terrain-detail.irradiated,
+.hex-terrain-detail.dam {
+  stroke: rgba(183, 221, 255, 0.29);
+}
+
+.hex-terrain-detail.nest {
+  stroke: rgba(255, 159, 177, 0.3);
+}
+
+.hex-terrain-detail.detail-variant-1 {
+  transform: translate3d(2px, -1px, 0) scale(0.92);
+}
+
+.hex-terrain-detail.detail-variant-2 {
+  transform: translate3d(-2px, 2px, 0) scale(1.04);
+}
+
+.hex-terrain-detail.detail-variant-3 {
+  transform: translate3d(1px, 2px, 0) scale(0.98);
 }
 
 .city-reactor-mark circle:first-of-type {

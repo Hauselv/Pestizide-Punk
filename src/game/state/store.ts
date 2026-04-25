@@ -3,6 +3,7 @@ import { buildingDefinitions, districtSlots, startingBuildings } from "../data/b
 import { researchNodes, startingResearch } from "../data/research";
 import { regionDefinitions } from "../data/sectors";
 import { eventDefinitions } from "../data/events";
+import { createHeroCandidatePool, startingHeroes } from "../data/heroes";
 import { baseReactorUnlockedSlotIds, getReactorTierBonuses, reactorUpgradeDefinitions } from "../data/reactor";
 import { worldHexes } from "../data/worldHexes";
 import type {
@@ -18,6 +19,8 @@ import type {
   EventResponseOption,
   Expedition,
   ExpeditionKind,
+  Hero,
+  HeroSkillId,
   HazardId,
   ProtectionProfile,
   ProtectionSlotId,
@@ -38,6 +41,7 @@ const MAX_BUILDING_LEVEL = 2;
 const DAY_LENGTH_SECONDS = 180;
 const DAY_PHASE_SECONDS = DAY_LENGTH_SECONDS / 4;
 const FORECAST_EVENT_COUNT = 3;
+const HERO_CANDIDATE_REFRESH_SECONDS = DAY_LENGTH_SECONDS * 2;
 
 function deterministicUnit(seed: number, salt = 0) {
   const value = Math.sin(seed * 12.9898 + salt * 78.233 + 0.9182) * 43758.5453;
@@ -174,7 +178,9 @@ interface GameStore extends SnapshotState {
   upgradeReactor: () => void;
   resolvePendingEvent: (responseId?: string) => void;
   startResearch: (nodeId: string) => void;
-  launchExpedition: (regionId: string, kind: ExpeditionKind) => void;
+  launchExpedition: (regionId: string, kind: ExpeditionKind, heroIds?: string[]) => void;
+  hireHero: (heroId: string) => void;
+  refreshHeroCandidates: () => void;
   setSpeed: (speed: number) => void;
   advanceTime: (ms: number) => void;
   saveGame: () => void;
@@ -471,12 +477,6 @@ function getUsedRoles(state: SnapshotState) {
     });
   });
 
-  state.expeditions.forEach((expedition) => {
-    Object.entries(expedition.staff).forEach(([role, amount]) => {
-      used[role as RoleId] += Number(amount ?? 0);
-    });
-  });
-
   return used;
 }
 
@@ -523,10 +523,134 @@ function applyFlow(resources: Record<ResourceId, number>, flow?: ResourceFlow, m
   });
 }
 
-function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["access"]) {
+const heroSkillIds: HeroSkillId[] = ["firstAid", "exploration", "engineering", "combat", "survival", "science"];
+
+function cloneHero(hero: Hero): Hero {
+  return {
+    ...hero,
+    skills: { ...hero.skills },
+    traits: [...hero.traits],
+    inventory: hero.inventory.map((item) => ({
+      ...item,
+      protection: item.protection ? { ...item.protection } : undefined,
+      skillBonus: item.skillBonus ? { ...item.skillBonus } : undefined
+    })),
+    hireCost: hero.hireCost ? { ...hero.hireCost } : undefined
+  };
+}
+
+function getHeroEffectiveSkills(hero: Hero) {
+  const skills = { ...hero.skills };
+  hero.inventory.forEach((item) => {
+    if (item.durability <= 0) return;
+    Object.entries(item.skillBonus ?? {}).forEach(([skillId, amount]) => {
+      skills[skillId as HeroSkillId] = Math.min(7, skills[skillId as HeroSkillId] + Number(amount ?? 0));
+    });
+  });
+  if (hero.injury === "light") {
+    heroSkillIds.forEach((skillId) => {
+      skills[skillId] = Math.max(0, skills[skillId] - 1);
+    });
+  }
+  if (hero.injury === "heavy") {
+    heroSkillIds.forEach((skillId) => {
+      skills[skillId] = Math.max(0, skills[skillId] - 2);
+    });
+  }
+  if (hero.injury === "critical") {
+    heroSkillIds.forEach((skillId) => {
+      skills[skillId] = Math.max(0, skills[skillId] - 3);
+    });
+  }
+  return skills;
+}
+
+function getHeroProtection(hero: Hero) {
+  const protection = zeroProtection();
+  hero.inventory.forEach((item) => {
+    if (item.durability <= 0) return;
+    addProtection(protection, item.protection);
+  });
+  return protection;
+}
+
+function getHeroGroup(state: SnapshotState, heroIds: string[]) {
+  const idSet = new Set(heroIds);
+  return state.heroes.filter((hero) => idSet.has(hero.id));
+}
+
+function getHeroGroupSkills(heroes: Hero[]) {
+  const totals: Record<HeroSkillId, number> = {
+    firstAid: 0,
+    exploration: 0,
+    engineering: 0,
+    combat: 0,
+    survival: 0,
+    science: 0
+  };
+  heroes.forEach((hero) => {
+    const effective = getHeroEffectiveSkills(hero);
+    heroSkillIds.forEach((skillId) => {
+      totals[skillId] += effective[skillId];
+    });
+  });
+  return totals;
+}
+
+function getHeroGroupProtection(heroes: Hero[]) {
+  const protection = zeroProtection();
+  heroes.forEach((hero) => {
+    addProtection(protection, getHeroProtection(hero));
+  });
+  return protection;
+}
+
+function getHeroGroupLimits(kind: ExpeditionKind) {
+  if (kind === "survey") return { min: 1, max: 2 };
+  if (kind === "secure") return { min: 3, max: 3 };
+  return { min: 2, max: 3 };
+}
+
+function getMissionPrimarySkill(kind: ExpeditionKind): HeroSkillId {
+  if (kind === "survey") return "exploration";
+  if (kind === "exploit") return "engineering";
+  if (kind === "secure") return "combat";
+  return "survival";
+}
+
+function getHazardScore(region: RegionDefinition) {
+  return Object.values(region.hazard as Record<string, number | undefined>).reduce<number>((sum, amount) => sum + Number(amount ?? 0), 0);
+}
+
+function getHeroRequirementProfile(state: SnapshotState, heroes: Hero[]) {
+  const protection = { ...state.population.protection };
+  addProtection(protection, getHeroGroupProtection(heroes), 1);
+  (Object.keys(protection) as ProtectionSlotId[]).forEach((slot) => {
+    protection[slot] = clamp(protection[slot], 0, 9);
+  });
+  return protection;
+}
+
+function getMissionOutcomeProfile(state: SnapshotState, region: RegionDefinition, kind: ExpeditionKind, heroes: Hero[], dayPhase: DayPhaseId) {
+  const skills = getHeroGroupSkills(heroes);
+  const hazardScore = getHazardScore(region);
+  const primarySkill = getMissionPrimarySkill(kind);
+  const relevantSkill = skills[primarySkill] + skills.survival * 0.65 + skills.firstAid * 0.35 + (kind === "survey" ? skills.science * 0.45 : 0);
+  const durationScale = clamp(1.22 - relevantSkill * 0.055 + hazardScore * 0.035, 0.55, 1.5);
+  const rewardScale = kind === "survey" ? clamp(1 + (skills.exploration + skills.science) * 0.035, 1, 1.45) : 1;
+  const risk = clamp(0.08 + hazardScore * 0.065 - skills.survival * 0.025 - skills.firstAid * 0.02 - relevantSkill * 0.012, 0.02, 0.72);
+  const baseDuration = kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
+  return {
+    total: Math.max(8, Math.ceil(baseDuration * getExpeditionPhaseMultiplier(dayPhase) * durationScale)),
+    risk,
+    rewardScale
+  };
+}
+
+function meetsRequirement(state: SnapshotState, requirement: RegionDefinition["access"], heroes: Hero[] = []) {
   const techOk = (requirement.tech ?? []).every((techId) => hasResearch(state, techId));
   const gearTier = state.resources.gear >= 12 ? 3 : state.resources.gear >= 6 ? 2 : state.resources.gear >= 3 ? 1 : 0;
-  const protection = state.population.protection;
+  const protection = getHeroRequirementProfile(state, heroes);
   const protectionOk = Object.entries(requirement.protection ?? {}).every(
     ([slot, amount]) => protection[slot as ProtectionSlotId] >= Number(amount ?? 0)
   );
@@ -570,6 +694,9 @@ function createInitialState(): SnapshotState {
     researched: [...startingResearch],
     activeResearch: null,
     expeditions: [],
+    heroes: startingHeroes.map(cloneHero),
+    heroCandidates: createHeroCandidatePool(1).map(cloneHero),
+    nextHeroCandidateRefreshAt: HERO_CANDIDATE_REFRESH_SECONDS,
     activeEvent: null,
     pendingEvent: null,
     eventForecast: [],
@@ -623,6 +750,18 @@ function loadState(): SnapshotState | null {
     parsed.reactor.nextUpgradeId ??= getNextReactorUpgradeId(parsed.reactor.tier ?? 1);
     parsed.districts = getDistrictsForUnlockedSlots(parsed.reactor.unlockedSlotIds);
     if (!parsed.regions || parsed.regions.length !== regionDefinitions.length) return null;
+    parsed.heroes = (parsed.heroes?.length ? parsed.heroes : startingHeroes).map((hero) => ({
+      ...cloneHero(hero),
+      status: hero.status === "assigned" && !parsed.expeditions?.some((expedition) => expedition.heroIds?.includes(hero.id)) ? "available" : hero.status
+    }));
+    parsed.heroCandidates = (parsed.heroCandidates?.length ? parsed.heroCandidates : createHeroCandidatePool(Math.max(1, parsed.dayIndex ?? 1))).map(cloneHero);
+    parsed.nextHeroCandidateRefreshAt ??= parsed.elapsedSeconds + HERO_CANDIDATE_REFRESH_SECONDS;
+    parsed.expeditions = (parsed.expeditions ?? []).map((expedition) => ({
+      ...expedition,
+      heroIds: expedition.heroIds ?? [],
+      risk: expedition.risk ?? 0.12,
+      rewardScale: expedition.rewardScale ?? 1
+    }));
     parsed.selectedResearchId ??= "renewable-grid";
     if (parsed.selectedSlotId && !parsed.districts.some((slot) => slot.id === parsed.selectedSlotId)) {
       parsed.selectedSlotId = null;
@@ -647,23 +786,73 @@ function cleanResourceBounds(state: SnapshotState) {
   state.pollution = clamp(state.pollution, 0, 100);
 }
 
-function createExpedition(kind: ExpeditionKind, regionId: string, dayPhase: DayPhaseId): Expedition {
-  const baseDuration = kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
-  const adjustedDuration = Math.ceil(baseDuration * getExpeditionPhaseMultiplier(dayPhase));
+function scaleResourceFlow(flow: ResourceFlow | undefined, multiplier: number) {
+  const scaled: ResourceFlow = {};
+  Object.entries(flow ?? {}).forEach(([resourceId, amount]) => {
+    scaled[resourceId as ResourceId] = Number(amount ?? 0) * multiplier;
+  });
+  return scaled;
+}
+
+function addHeroXp(hero: Hero, xp: number, preferredSkill: HeroSkillId) {
+  let nextHero = { ...hero, skills: { ...hero.skills }, traits: [...hero.traits], inventory: hero.inventory.map((item) => ({ ...item })) };
+  nextHero.xp += xp;
+  while (nextHero.xp >= 10 + nextHero.level * 5) {
+    nextHero.xp -= 10 + nextHero.level * 5;
+    nextHero.level += 1;
+    nextHero.skills[preferredSkill] = Math.min(5, nextHero.skills[preferredSkill] + 1);
+  }
+  return nextHero;
+}
+
+function resolveHeroMissionAftermath(state: SnapshotState, expedition: Expedition, region: RegionDefinition) {
+  const xp = Math.ceil(4 + getHazardScore(region) + expedition.total / 12);
+  const preferredSkill = getMissionPrimarySkill(expedition.kind);
+  const injuryRoll = deterministicUnit(Math.floor(state.elapsedSeconds) + expedition.id.length, expedition.total);
+  const willInjure = injuryRoll < expedition.risk;
+  const injurySeverity = expedition.risk > 0.46 ? "critical" : expedition.risk > 0.27 ? "heavy" : "light";
+
+  state.heroes = state.heroes.map((hero) => {
+    if (!expedition.heroIds.includes(hero.id)) return hero;
+    let nextHero = addHeroXp(hero, xp, preferredSkill);
+    nextHero.assignedExpeditionId = undefined;
+    if (willInjure) {
+      const firstAid = getHeroGroupSkills(getHeroGroup(state, expedition.heroIds)).firstAid;
+      const recovery = injurySeverity === "light" ? 35 : injurySeverity === "heavy" ? 90 : 150;
+      nextHero.status = injurySeverity === "light" ? "recovering" : "injured";
+      nextHero.injury = injurySeverity;
+      nextHero.injuredUntil = state.elapsedSeconds + Math.max(24, recovery - firstAid * 7);
+      nextHero.inventory = nextHero.inventory.map((item, index) => index === 0 ? { ...item, durability: Math.max(0, item.durability - Math.ceil(expedition.risk * 28)) } : item);
+    } else {
+      nextHero.status = "available";
+      nextHero.injury = undefined;
+      nextHero.injuredUntil = undefined;
+    }
+    return nextHero;
+  });
+
+  if (willInjure) {
+    state.alerts = appendAlert(state.alerts, {
+      id: `hero-injury-${expedition.id}`,
+      tone: "warning",
+      text: `${region.name} mission caused ${injurySeverity} field injuries.`
+    });
+  }
+}
+
+function createExpedition(kind: ExpeditionKind, regionId: string, state: SnapshotState, heroIds: string[]): Expedition {
+  const region = regionMap[regionId];
+  const heroes = getHeroGroup(state, heroIds);
+  const outcome = getMissionOutcomeProfile(state, region, kind, heroes, state.dayPhase);
   return {
     id: `${kind}-${regionId}-${Math.random().toString(36).slice(2, 7)}`,
     regionId,
     kind,
-    remaining: adjustedDuration,
-    total: adjustedDuration,
-    staff:
-      kind === "survey"
-        ? { rangers: 2, researchers: 1 }
-        : kind === "exploit"
-          ? { workers: 3, rangers: 1 }
-          : kind === "secure"
-            ? { workers: 2, technicians: 1, rangers: 2 }
-            : { workers: 2, technicians: 2 }
+    remaining: outcome.total,
+    total: outcome.total,
+    heroIds,
+    risk: outcome.risk,
+    rewardScale: outcome.rewardScale
   };
 }
 
@@ -674,6 +863,16 @@ function tickState(state: SnapshotState, seconds: number) {
   const previousElapsed = state.elapsedSeconds;
   state.elapsedSeconds += dt;
   syncTemporalState(state);
+  state.heroes = state.heroes.map((hero) => {
+    if ((hero.status === "injured" || hero.status === "recovering") && Number(hero.injuredUntil ?? 0) <= state.elapsedSeconds) {
+      return { ...hero, status: "available", injury: undefined, injuredUntil: undefined };
+    }
+    return hero;
+  });
+  if (state.elapsedSeconds >= state.nextHeroCandidateRefreshAt) {
+    state.heroCandidates = createHeroCandidatePool(state.dayIndex + state.heroes.length).map(cloneHero);
+    state.nextHeroCandidateRefreshAt = state.elapsedSeconds + HERO_CANDIDATE_REFRESH_SECONDS;
+  }
   const dayPhase = state.dayPhase;
   const nightHazardMultiplier = getNightHazardMultiplier(dayPhase);
   const reactorBonuses = getReactorTierBonuses(state.reactor.tier);
@@ -845,7 +1044,7 @@ function tickState(state: SnapshotState, seconds: number) {
       if (expedition.kind === "survey") {
         regionRuntime.state = "surveyed";
         regionRuntime.discovered = true;
-        applyFlow(state.resources, regionDefinition.surveyReward);
+        applyFlow(state.resources, scaleResourceFlow(regionDefinition.surveyReward, expedition.rewardScale));
       }
       if (expedition.kind === "exploit") {
         regionRuntime.state = "exploiting";
@@ -858,7 +1057,9 @@ function tickState(state: SnapshotState, seconds: number) {
         regionRuntime.state = "outpost";
       }
 
-      state.log = appendLog(state.log, `${regionDefinition.name}: ${expedition.kind} mission completed.`);
+      resolveHeroMissionAftermath(state, expedition, regionDefinition);
+      const heroNames = getHeroGroup(state, expedition.heroIds).map((hero) => hero.name).join(", ");
+      state.log = appendLog(state.log, `${regionDefinition.name}: ${expedition.kind} mission completed by ${heroNames}.`);
       state.alerts = appendAlert(state.alerts, {
         id: `expedition-${expedition.id}` ,
         tone: "success",
@@ -945,7 +1146,10 @@ function cloneSnapshot(state: SnapshotState): SnapshotState {
     regions: state.regions.map((region) => ({ ...region })),
     researched: [...state.researched],
     activeResearch: state.activeResearch ? { ...state.activeResearch } : null,
-    expeditions: state.expeditions.map((expedition) => ({ ...expedition, staff: { ...expedition.staff } })),
+    expeditions: state.expeditions.map((expedition) => ({ ...expedition, heroIds: [...expedition.heroIds] })),
+    heroes: state.heroes.map(cloneHero),
+    heroCandidates: state.heroCandidates.map(cloneHero),
+    nextHeroCandidateRefreshAt: state.nextHeroCandidateRefreshAt,
     activeEvent: cloneEvent(state.activeEvent),
     pendingEvent: cloneEvent(state.pendingEvent),
     eventForecast: state.eventForecast.map((event) => ({ ...event })),
@@ -1212,11 +1416,37 @@ export const useGameStore = create<GameStore>((set, get) => ({
       return nextState;
     }),
 
-  launchExpedition: (regionId, kind) =>
+  launchExpedition: (regionId, kind, heroIds = []) =>
     set((state) => {
       const regionDefinition = regionMap[regionId];
       const regionRuntime = state.regions.find((item) => item.id === regionId);
       if (!regionDefinition || !regionRuntime) return state;
+      const limits = getHeroGroupLimits(kind);
+      const requestedHeroIds = heroIds.length > 0
+        ? heroIds
+        : state.heroes.filter((hero) => hero.status === "available").slice(0, limits.min).map((hero) => hero.id);
+      const selectedHeroIds = [...new Set(requestedHeroIds)];
+      const heroes = getHeroGroup(state, selectedHeroIds);
+
+      if (selectedHeroIds.length < limits.min || selectedHeroIds.length > limits.max || heroes.length !== selectedHeroIds.length) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, { id: `hero-count-${regionId}-${kind}`, tone: "warning", text: `${kind} missions need ${limits.min}${limits.min === limits.max ? "" : `-${limits.max}`} available heroes.` })
+        };
+      }
+      if (heroes.some((hero) => hero.status !== "available")) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, { id: `hero-status-${regionId}-${kind}`, tone: "warning", text: "All selected heroes must be available before launch." })
+        };
+      }
+      const groupSkills = getHeroGroupSkills(heroes);
+      if (kind === "outpost" && groupSkills.engineering + groupSkills.survival < 3) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, { id: `hero-outpost-${regionId}`, tone: "warning", text: "Outpost teams need stronger engineering or survival coverage." })
+        };
+      }
 
       const requirement = kind === "survey"
         ? regionDefinition.access
@@ -1226,7 +1456,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
             ? regionDefinition.secure
             : { tech: ["relay-network"] };
 
-      if (!meetsRequirement(state, requirement)) {
+      if (!meetsRequirement(state, requirement, heroes)) {
         return {
           ...state,
           alerts: appendAlert(state.alerts, { id: `requirement-${regionId}-${kind}`, tone: "warning", text: `${regionDefinition.name} needs more tech, protection, or gear for ${kind}.` })
@@ -1234,21 +1464,55 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
       if (state.expeditions.some((item) => item.regionId === regionId)) return state;
 
-      const expedition = createExpedition(kind, regionId, state.dayPhase);
-      const freeRoles = getFreeRoles(state);
-      const staffOk = Object.entries(expedition.staff).every(([role, amount]) => freeRoles[role as RoleId] >= Number(amount ?? 0));
-      if (!staffOk) {
-        return {
-          ...state,
-          alerts: appendAlert(state.alerts, { id: `expedition-staff-${regionId}`, tone: "warning", text: `Not enough free staff for ${kind} mission.` })
-        };
-      }
+      const expedition = createExpedition(kind, regionId, state, selectedHeroIds);
+      const heroNames = heroes.map((hero) => hero.name).join(", ");
 
       const nextState = {
         ...state,
         regions: state.regions.map((region) => region.id === regionId && kind === "survey" ? { ...region, state: "surveying" as const } : region),
         expeditions: [...state.expeditions, expedition],
-        log: appendLog(state.log, `${regionDefinition.name}: ${kind} mission launched.`)
+        heroes: state.heroes.map((hero) => selectedHeroIds.includes(hero.id) ? { ...hero, status: "assigned" as const, assignedExpeditionId: expedition.id } : hero),
+        log: appendLog(state.log, `${regionDefinition.name}: ${kind} mission launched with ${heroNames}.`)
+      };
+      saveState(nextState);
+      return nextState;
+    }),
+
+  hireHero: (heroId) =>
+    set((state) => {
+      const candidate = state.heroCandidates.find((hero) => hero.id === heroId);
+      if (!candidate) return state;
+      if (!canAfford(state.resources, candidate.hireCost)) {
+        return {
+          ...state,
+          alerts: appendAlert(state.alerts, { id: `hire-cost-${heroId}`, tone: "warning", text: `Insufficient stock to hire ${candidate.name}.` })
+        };
+      }
+      const resources = { ...state.resources };
+      applyFlow(resources, candidate.hireCost, -1);
+      const hired = cloneHero(candidate);
+      hired.id = `hero-${candidate.id}-${Math.floor(state.elapsedSeconds)}`;
+      hired.status = "available";
+      hired.hireCost = undefined;
+      const nextState = {
+        ...state,
+        resources,
+        heroes: [...state.heroes, hired],
+        heroCandidates: state.heroCandidates.filter((hero) => hero.id !== heroId),
+        log: appendLog(state.log, `${candidate.name} joined the expedition roster.`),
+        alerts: appendAlert(state.alerts, { id: `hire-${heroId}`, tone: "success", text: `${candidate.name} hired.` })
+      };
+      saveState(nextState);
+      return nextState;
+    }),
+
+  refreshHeroCandidates: () =>
+    set((state) => {
+      const nextState = {
+        ...state,
+        heroCandidates: createHeroCandidatePool(state.dayIndex + state.heroes.length + 3).map(cloneHero),
+        nextHeroCandidateRefreshAt: state.elapsedSeconds + HERO_CANDIDATE_REFRESH_SECONDS,
+        log: appendLog(state.log, "Recruitment board refreshed.")
       };
       saveState(nextState);
       return nextState;
@@ -1306,7 +1570,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       eventForecast: state.eventForecast,
       activeEvent: state.activeEvent?.title ?? null,
       activeEventRemaining: state.activeEvent?.remaining ?? null,
-      expeditions: state.expeditions.map((item) => ({ regionId: item.regionId, kind: item.kind, remaining: item.remaining })),
+      expeditions: state.expeditions.map((item) => ({ regionId: item.regionId, kind: item.kind, remaining: item.remaining, heroIds: item.heroIds })),
+      heroes: state.heroes.map((hero) => ({
+        id: hero.id,
+        name: hero.name,
+        level: hero.level,
+        status: hero.status,
+        skills: hero.skills,
+        injury: hero.injury ?? null
+      })),
       regions: state.regions.map((region) => ({ id: region.id, state: region.state, discovered: region.discovered, hexCount: regionMap[region.id]?.hexTileIds.length ?? 0 })),
       worldHexes: {
         total: worldHexes.length,

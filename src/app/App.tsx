@@ -15,6 +15,8 @@ import type {
   EventId,
   Expedition,
   ExpeditionKind,
+  Hero,
+  HeroSkillId,
   HexCoord,
   HexTileDefinition,
   ProtectionSlotId,
@@ -190,12 +192,6 @@ function getFreeRoles(buildings: BuildingInstance[], expeditions: Expedition[], 
     });
   });
 
-  expeditions.forEach((expedition) => {
-    Object.entries(expedition.staff).forEach(([role, amount]) => {
-      used[role as RoleId] += Number(amount ?? 0);
-    });
-  });
-
   return {
     workers: roles.workers - used.workers,
     technicians: roles.technicians - used.technicians,
@@ -234,6 +230,87 @@ function hexToPixel(coord: HexCoord) {
     x: HEX_SIZE * Math.sqrt(3) * (coord.q + coord.r / 2),
     y: HEX_SIZE * 1.5 * coord.r
   };
+}
+
+const heroSkillIds: HeroSkillId[] = ["firstAid", "exploration", "engineering", "combat", "survival", "science"];
+
+function getHeroEffectiveSkills(hero: Hero) {
+  const skills = { ...hero.skills };
+  hero.inventory.forEach((item) => {
+    if (item.durability <= 0) return;
+    Object.entries(item.skillBonus ?? {}).forEach(([skillId, amount]) => {
+      skills[skillId as HeroSkillId] = Math.min(7, skills[skillId as HeroSkillId] + Number(amount ?? 0));
+    });
+  });
+  if (hero.injury === "light") {
+    heroSkillIds.forEach((skillId) => { skills[skillId] = Math.max(0, skills[skillId] - 1); });
+  }
+  if (hero.injury === "heavy") {
+    heroSkillIds.forEach((skillId) => { skills[skillId] = Math.max(0, skills[skillId] - 2); });
+  }
+  if (hero.injury === "critical") {
+    heroSkillIds.forEach((skillId) => { skills[skillId] = Math.max(0, skills[skillId] - 3); });
+  }
+  return skills;
+}
+
+function getHeroGroupSkills(heroes: Hero[]) {
+  const totals = Object.fromEntries(heroSkillIds.map((skillId) => [skillId, 0])) as Record<HeroSkillId, number>;
+  heroes.forEach((hero) => {
+    const skills = getHeroEffectiveSkills(hero);
+    heroSkillIds.forEach((skillId) => {
+      totals[skillId] += skills[skillId];
+    });
+  });
+  return totals;
+}
+
+function getHeroGroupProtection(heroes: Hero[]) {
+  const protection: Record<ProtectionSlotId, number> = { respiratory: 0, chemical: 0, radiation: 0, environmental: 0 };
+  heroes.forEach((hero) => {
+    hero.inventory.forEach((item) => {
+      if (item.durability <= 0) return;
+      Object.entries(item.protection ?? {}).forEach(([slot, amount]) => {
+        protection[slot as ProtectionSlotId] += Number(amount ?? 0);
+      });
+    });
+  });
+  return protection;
+}
+
+function mergeProtection(base: Record<ProtectionSlotId, number>, extra: Record<ProtectionSlotId, number>) {
+  return {
+    respiratory: base.respiratory + extra.respiratory,
+    chemical: base.chemical + extra.chemical,
+    radiation: base.radiation + extra.radiation,
+    environmental: base.environmental + extra.environmental
+  };
+}
+
+function getHeroGroupLimits(kind: ExpeditionKind) {
+  if (kind === "survey") return { min: 1, max: 2 };
+  if (kind === "secure") return { min: 3, max: 3 };
+  return { min: 2, max: 3 };
+}
+
+function getMissionPrimarySkill(kind: ExpeditionKind): HeroSkillId {
+  if (kind === "survey") return "exploration";
+  if (kind === "exploit") return "engineering";
+  if (kind === "secure") return "combat";
+  return "survival";
+}
+
+function getMissionPreview(region: typeof regionDefinitions[number], kind: ExpeditionKind, heroes: Hero[], dayPhase: string) {
+  const skills = getHeroGroupSkills(heroes);
+  const hazardScore = Object.values(region.hazard).reduce<number>((sum, amount) => sum + Number(amount ?? 0), 0);
+  const primary = getMissionPrimarySkill(kind);
+  const relevantSkill = skills[primary] + skills.survival * 0.65 + skills.firstAid * 0.35 + (kind === "survey" ? skills.science * 0.45 : 0);
+  const phaseScale = dayPhase === "night" ? 1.16 : dayPhase === "dusk" ? 1.08 : 1;
+  const baseDuration = kind === "survey" ? 18 : kind === "exploit" ? 24 : kind === "secure" ? 30 : 22;
+  const duration = Math.max(8, Math.ceil(baseDuration * phaseScale * Math.min(1.5, Math.max(0.55, 1.22 - relevantSkill * 0.055 + hazardScore * 0.035))));
+  const risk = Math.min(0.72, Math.max(0.02, 0.08 + hazardScore * 0.065 - skills.survival * 0.025 - skills.firstAid * 0.02 - relevantSkill * 0.012));
+  const reward = kind === "survey" ? Math.min(1.45, Math.max(1, 1 + (skills.exploration + skills.science) * 0.035)) : 1;
+  return { duration, risk, reward, skills };
 }
 
 function getHexVertices(center: { x: number; y: number }) {
@@ -701,6 +778,121 @@ function renderTerrainAmbientLayer(terrainType: TerrainType) {
           <circle className="ambient-orb drift-b" cx="12" cy="-6" r="5" />
         </>
       );
+  }
+}
+
+function renderTerrainTileDetail(terrainType: TerrainType, decorVariant: number) {
+  const variantClass = `detail-variant-${decorVariant % 4}`;
+  switch (terrainType) {
+    case "toxic-forest":
+      return (
+        <g className={`hex-terrain-detail forest ${variantClass}`}>
+          <path d="M -18 8 C -10 -2 -4 -4 4 -15" />
+          <path d="M -5 18 C 2 7 9 2 18 -8" />
+          <circle cx="-11" cy="-6" r="3.4" />
+          <circle cx="10" cy="8" r="2.8" />
+        </g>
+      );
+    case "fungal-wetlands":
+      return (
+        <g className={`hex-terrain-detail wetlands ${variantClass}`}>
+          <path d="M -22 9 C -12 2 -4 2 5 9 C 11 14 17 14 23 8" />
+          <ellipse cx="-8" cy="-7" rx="5" ry="2.6" />
+          <ellipse cx="10" cy="-2" rx="6" ry="3" />
+        </g>
+      );
+    case "overgrown-ruins":
+      return (
+        <g className={`hex-terrain-detail ruins ${variantClass}`}>
+          <path d="M -18 14 L -5 -12 L 10 13" />
+          <path d="M -9 2 H 11" />
+          <path d="M -14 -10 C -8 -5 -3 -2 3 5" />
+        </g>
+      );
+    case "scavenger-scrapland":
+      return (
+        <g className={`hex-terrain-detail scrap ${variantClass}`}>
+          <path d="M -18 12 L 15 -12" />
+          <path d="M -8 -13 L 18 8" />
+          <circle cx="-12" cy="-2" r="3.5" />
+          <circle cx="9" cy="10" r="3" />
+        </g>
+      );
+    case "chemical-waste":
+    case "petro-marsh":
+      return (
+        <g className={`hex-terrain-detail waste ${variantClass}`}>
+          <path d="M -20 10 C -12 4 -4 4 4 10 C 12 16 18 16 23 10" />
+          <path d="M -15 -5 C -8 -11 -2 -11 5 -5 C 10 -1 15 -1 19 -6" />
+          <circle cx="8" cy="6" r="3.2" />
+        </g>
+      );
+    case "irradiated-badlands":
+      return (
+        <g className={`hex-terrain-detail irradiated ${variantClass}`}>
+          <path d="M -22 11 L -5 -4 L 6 8 L 21 -10" />
+          <path d="M -10 -14 L 8 16" />
+          <circle cx="1" cy="-1" r="4" />
+        </g>
+      );
+    case "industrial-hulk":
+      return (
+        <g className={`hex-terrain-detail industrial ${variantClass}`}>
+          <rect x="-16" y="-8" width="8" height="19" rx="1.5" />
+          <rect x="4" y="-14" width="8" height="26" rx="1.5" />
+          <path d="M -20 14 H 18 M -12 -8 V -16 M 8 -14 V -22" />
+        </g>
+      );
+    case "mutant-nest":
+      return (
+        <g className={`hex-terrain-detail nest ${variantClass}`}>
+          <ellipse cx="0" cy="7" rx="15" ry="7" />
+          <path d="M -12 0 L -17 -12 M 0 -1 V -17 M 12 0 L 18 -12" />
+          <circle cx="-5" cy="7" r="2.2" />
+          <circle cx="6" cy="8" r="2" />
+        </g>
+      );
+    case "steam-fissures":
+      return (
+        <g className={`hex-terrain-detail fissures ${variantClass}`}>
+          <path d="M -17 16 L -7 -13 L 1 16" />
+          <path d="M 5 17 L 13 -18 L 20 17" />
+          <path d="M -6 -14 C -12 -20 -10 -25 -5 -29 M 13 -19 C 8 -25 9 -30 14 -34" />
+        </g>
+      );
+    case "flooded-dam":
+      return (
+        <g className={`hex-terrain-detail dam ${variantClass}`}>
+          <path d="M -22 -8 V 12 H 22 V -8" />
+          <path d="M -9 -8 V 12 M 4 -8 V 12" />
+          <path d="M -24 7 C -15 13 -7 13 1 7 C 9 1 17 1 24 7" />
+        </g>
+      );
+    case "algae-salt-flats":
+      return (
+        <g className={`hex-terrain-detail algae ${variantClass}`}>
+          <ellipse cx="-10" cy="5" rx="10" ry="4.2" />
+          <ellipse cx="12" cy="-5" rx="8.5" ry="3.8" />
+          <path d="M -23 16 C -13 10 -5 10 4 16 C 11 21 17 21 23 15" />
+        </g>
+      );
+    case "ash-farmland":
+      return (
+        <g className={`hex-terrain-detail farmland ${variantClass}`}>
+          <path d="M -24 14 C -15 9 -7 9 1 14 C 9 19 16 19 24 13" />
+          <path d="M -21 3 C -12 -2 -4 -2 4 3 C 12 8 18 8 22 3" />
+          <path d="M -18 -9 C -10 -13 -2 -13 6 -9 C 13 -5 18 -5 22 -9" />
+        </g>
+      );
+    case "neutral-rock":
+      return (
+        <g className={`hex-terrain-detail rock ${variantClass}`}>
+          <path d="M -19 11 L -7 -10 L 3 3 L 16 -14" />
+          <path d="M -13 -8 L 10 15" />
+        </g>
+      );
+    default:
+      return null;
   }
 }
 
@@ -1232,6 +1424,9 @@ function WorldMap() {
               }} role="button" tabIndex={0}>
                 <polygon className="hex-base" points={tile.points} fill={`url(#terrain-${tile.id})`} />
                 <polygon className="hex-danger" points={tile.points} fill={tile.dangerTint ?? terrain.accent} />
+                <g transform={`translate(${tile.center.x}, ${tile.center.y}) rotate(${(tile.decorVariant % 4) * 22.5})`}>
+                  {discovered ? renderTerrainTileDetail(tile.terrainType, tile.decorVariant) : null}
+                </g>
                 <polygon className="hex-stroke" points={tile.points} stroke={terrain.stroke} />
                 {!discovered ? <polygon className="hex-fog" points={tile.points} /> : null}
                 {isCity ? (
@@ -1423,7 +1618,7 @@ function CityView() {
 function ViewTabs() {
   const view = useGameStore((state) => state.view);
   const setView = useGameStore((state) => state.setView);
-  const tabs: { id: ViewMode; label: string }[] = [{ id: "world", label: "World" }, { id: "city", label: "City" }, { id: "research", label: "Research" }];
+  const tabs: { id: ViewMode; label: string }[] = [{ id: "world", label: "World" }, { id: "city", label: "City" }, { id: "research", label: "Research" }, { id: "heroes", label: "Heroes" }];
 
   return (
     <nav className="view-tabs">
@@ -1441,17 +1636,26 @@ function RegionActionButtons() {
   const researched = useGameStore((state) => state.researched);
   const resources = useGameStore((state) => state.resources);
   const protection = useGameStore((state) => state.population.protection);
+  const heroes = useGameStore((state) => state.heroes);
+  const dayPhase = useGameStore((state) => state.dayPhase);
+  const [selectedHeroIds, setSelectedHeroIds] = useState<string[]>([]);
 
   const regionDefinition = selectedRegionId ? regionMap[selectedRegionId] : null;
   const regionRuntime = regions.find((region) => region.id === selectedRegionId);
   if (!regionDefinition || !regionRuntime) return null;
+  const selectedHeroes = heroes.filter((hero) => selectedHeroIds.includes(hero.id));
+  const groupProtection = mergeProtection(protection, getHeroGroupProtection(selectedHeroes));
+  const selectedHeroesAvailable = selectedHeroes.length === selectedHeroIds.length && selectedHeroes.every((hero) => hero.status === "available");
 
   const canStart = (kind: ExpeditionKind) => {
     const requirement = kind === "survey" ? regionDefinition.access : kind === "exploit" ? regionDefinition.exploit : kind === "secure" ? regionDefinition.secure : { tech: ["relay-network"] };
     const techOk = (requirement.tech ?? []).every((techId) => researched.includes(techId));
     const gearTier = resources.gear >= 12 ? 3 : resources.gear >= 6 ? 2 : resources.gear >= 3 ? 1 : 0;
-    const protectionOk = Object.entries(requirement.protection ?? {}).every(([slot, amount]) => protection[slot as ProtectionSlotId] >= Number(amount ?? 0));
-    return techOk && protectionOk && gearTier >= (requirement.gear ?? 0);
+    const protectionOk = Object.entries(requirement.protection ?? {}).every(([slot, amount]) => groupProtection[slot as ProtectionSlotId] >= Number(amount ?? 0));
+    const limits = getHeroGroupLimits(kind);
+    const heroCountOk = selectedHeroes.length >= limits.min && selectedHeroes.length <= limits.max;
+    const outpostOk = kind !== "outpost" || getHeroGroupSkills(selectedHeroes).engineering + getHeroGroupSkills(selectedHeroes).survival >= 3;
+    return techOk && protectionOk && gearTier >= (requirement.gear ?? 0) && heroCountOk && selectedHeroesAvailable && outpostOk;
   };
 
   const actions = [
@@ -1462,11 +1666,40 @@ function RegionActionButtons() {
   ];
 
   return (
-    <div className="action-stack">
+    <div className="action-stack hero-composer">
+      <div className="hero-picker-list">
+        {heroes.map((hero) => {
+          const selected = selectedHeroIds.includes(hero.id);
+          const disabled = hero.status !== "available" && !selected;
+          return (
+            <button
+              key={hero.id}
+              className={`hero-picker ${selected ? "selected" : ""}`}
+              disabled={disabled}
+              onClick={() => setSelectedHeroIds((current) => selected ? current.filter((id) => id !== hero.id) : [...current, hero.id])}
+            >
+              <span>{hero.name}</span>
+              <small>L{hero.level} {hero.archetype} / {hero.status}</small>
+            </button>
+          );
+        })}
+      </div>
+      {selectedHeroes.length > 0 ? (
+        <div className="mission-preview">
+          <span>Group</span>
+          <strong>{Object.entries(getHeroGroupSkills(selectedHeroes)).filter(([, value]) => value > 0).map(([skill, value]) => `${skill} ${value}`).join(" / ")}</strong>
+          <small>Protection with gear: {formatProtection(groupProtection)}</small>
+        </div>
+      ) : <div className="muted-box">Select heroes from the roster before launching a mission.</div>}
       {actions.map((item) => (
-        <button key={item.kind} disabled={item.disabled} onClick={() => launchExpedition(regionDefinition.id, item.kind)}>
+        <button key={item.kind} disabled={item.disabled || !canStart(item.kind)} onClick={() => launchExpedition(regionDefinition.id, item.kind, selectedHeroIds)}>
           <span>{item.label}</span>
-          <small>{item.disabled && item.kind !== "survey" ? getBlockedReason(item.requirement, researched, resources.gear, protection) : getRequirementSummary(item.requirement, researched, resources.gear, protection).join(" / ")}</small>
+          <small>{(() => {
+            const limits = getHeroGroupLimits(item.kind);
+            const preview = getMissionPreview(regionDefinition, item.kind, selectedHeroes, dayPhase);
+            const gateText = item.disabled && item.kind !== "survey" ? getBlockedReason(item.requirement, researched, resources.gear, groupProtection) : getRequirementSummary(item.requirement, researched, resources.gear, groupProtection).join(" / ");
+            return `${gateText} / Heroes ${selectedHeroes.length}/${limits.min}-${limits.max} / ${preview.duration}s / risk ${Math.round(preview.risk * 100)}%`;
+          })()}</small>
         </button>
       ))}
     </div>
@@ -1946,6 +2179,88 @@ function ResearchCanvas() {
     </section>
   );
 }
+
+function HeroesView() {
+  const heroes = useGameStore((state) => state.heroes);
+  const candidates = useGameStore((state) => state.heroCandidates);
+  const resources = useGameStore((state) => state.resources);
+  const nextRefresh = useGameStore((state) => state.nextHeroCandidateRefreshAt);
+  const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
+  const hireHero = useGameStore((state) => state.hireHero);
+  const refreshHeroCandidates = useGameStore((state) => state.refreshHeroCandidates);
+  const available = heroes.filter((hero) => hero.status === "available").length;
+  const injured = heroes.filter((hero) => hero.status === "injured" || hero.status === "recovering").length;
+
+  return (
+    <section className="canvas-card heroes-shell">
+      <div className="panel-header">
+        <div>
+          <p className="eyebrow">Hero Roster</p>
+          <h2>Expedition Teams</h2>
+        </div>
+        <div className="research-status-cluster">
+          <div className="status-tile"><span>Available</span><strong>{available}</strong></div>
+          <div className="status-tile"><span>In Recovery</span><strong>{injured}</strong></div>
+        </div>
+      </div>
+      <div className="hero-roster-grid">
+        {heroes.map((hero) => {
+          const skills = getHeroEffectiveSkills(hero);
+          return (
+            <article key={hero.id} className={`hero-card ${hero.status}`}>
+              <div className="hero-card-head">
+                <div>
+                  <span>{hero.archetype}</span>
+                  <strong>{hero.name}</strong>
+                </div>
+                <em>L{hero.level}</em>
+              </div>
+              <div className="hero-status-row">
+                <span className={`status-pill ${hero.status}`}>{hero.status}</span>
+                {hero.injury ? <span className="flow-tag warning">{hero.injury} injury</span> : null}
+              </div>
+              <div className="hero-skill-grid">
+                {heroSkillIds.map((skillId) => <div key={skillId}><span>{skillId}</span><strong>{skills[skillId]}</strong></div>)}
+              </div>
+              <div className="flow-tags">
+                {hero.traits.map((trait) => <span key={trait} className="flow-tag doctrine">{trait}</span>)}
+              </div>
+              <div className="hero-inventory">
+                {hero.inventory.map((item) => <span key={item.id}>{item.name} {item.durability}%</span>)}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <div className="subsection">
+        <div className="panel-header compact-header">
+          <div>
+            <p className="eyebrow">Recruitment Board</p>
+            <h2>City Hires</h2>
+          </div>
+          <button className="ghost-button" onClick={refreshHeroCandidates}>Refresh</button>
+        </div>
+        <div className="candidate-grid">
+          {candidates.map((candidate) => {
+            const affordable = canAffordFlow(resources, candidate.hireCost);
+            return (
+              <button key={candidate.id} className="candidate-card" onClick={() => hireHero(candidate.id)} disabled={!affordable}>
+                <span>{candidate.archetype}</span>
+                <strong>{candidate.name}</strong>
+                <small>{Object.entries(getHeroEffectiveSkills(candidate)).filter(([, value]) => value > 0).map(([skill, value]) => `${skill} ${value}`).join(" / ")}</small>
+                <small>{candidate.inventory.map((item) => item.name).join(" / ")}</small>
+                <small>Cost: {formatCost(candidate.hireCost)}</small>
+              </button>
+            );
+          })}
+          {candidates.length === 0 ? <div className="muted-box">Recruitment board is empty. Refresh to call in a new set of candidates.</div> : null}
+        </div>
+        <div className="muted-box">Next automatic refresh in {formatDuration(Math.max(0, nextRefresh - elapsedSeconds))}.</div>
+      </div>
+    </section>
+  );
+}
+
 function BottomBar() {
   const speed = useGameStore((state) => state.speed);
   const elapsedSeconds = useGameStore((state) => state.elapsedSeconds);
@@ -1955,6 +2270,7 @@ function BottomBar() {
   const pendingEvent = useGameStore((state) => state.pendingEvent);
   const eventForecast = useGameStore((state) => state.eventForecast);
   const expeditions = useGameStore((state) => state.expeditions);
+  const heroes = useGameStore((state) => state.heroes);
   const log = useGameStore((state) => state.log);
   const pollution = useGameStore((state) => state.pollution);
   const reactor = useGameStore((state) => state.reactor);
@@ -1995,7 +2311,10 @@ function BottomBar() {
         ) : <strong>{eventSummary || "No forecast"}</strong>}
       </div>
       <div className="status-block"><span>Pollution</span><strong>{pollution.toFixed(0)}%</strong></div>
-      <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => `${item.kind}:${Math.ceil(item.remaining)}s`).join(" | ") : "No missions underway"}</strong></div>
+      <div className="status-block wide"><span>Expeditions</span><strong>{expeditions.length > 0 ? expeditions.map((item) => {
+        const names = item.heroIds.map((heroId) => heroes.find((hero) => hero.id === heroId)?.name.split(" ")[0] ?? heroId).join(",");
+        return `${item.kind}:${Math.ceil(item.remaining)}s ${names}`;
+      }).join(" | ") : "No missions underway"}</strong></div>
       <div className="status-block wide"><span>Log</span><strong>{log[0]}</strong></div>
     </footer>
   );
@@ -2090,12 +2409,21 @@ function OperationsPanel() {
   const buildings = useGameStore((state) => state.buildings);
   const expeditions = useGameStore((state) => state.expeditions);
   const population = useGameStore((state) => state.population);
+  const heroes = useGameStore((state) => state.heroes);
   const pollution = useGameStore((state) => state.pollution);
   const freeRoles = getFreeRoles(buildings, expeditions, population.roles);
   const doctrineProfile = getDoctrineProfile(buildings);
   const doctrineSummary = summarizeDoctrineProfile(doctrineProfile) || "no doctrine mix yet";
   const technicalLoad = doctrineProfile.synthetic + doctrineProfile.engineered + doctrineProfile.fossil + doctrineProfile.radical;
   const staffingRisk = freeRoles.technicians <= 1 && technicalLoad >= 3 ? "overstretched" : freeRoles.technicians <= 3 || freeRoles.workers <= 4 ? "tight" : "stable";
+  const heroSummary = `${heroes.filter((hero) => hero.status === "available").length} ready / ${heroes.filter((hero) => hero.status === "assigned").length} assigned / ${heroes.filter((hero) => hero.status === "injured" || hero.status === "recovering").length} recovering`;
+  const bestSpecialist = heroes
+    .filter((hero) => hero.status === "available")
+    .map((hero) => {
+      const skills = getHeroEffectiveSkills(hero);
+      const best = Object.entries(skills).sort((left, right) => Number(right[1]) - Number(left[1]))[0];
+      return `${hero.name.split(" ")[0]} ${best?.[0] ?? "general"} ${best?.[1] ?? 0}`;
+    })[0] ?? "no free specialists";
 
   return (
     <section className="tutorial-panel">
@@ -2117,6 +2445,14 @@ function OperationsPanel() {
       <div className="mini-panel wide-panel">
         <span>Staffing Risk</span>
         <strong>{staffingRisk}</strong>
+      </div>
+      <div className="mini-panel wide-panel">
+        <span>Heroes</span>
+        <strong>{heroSummary}</strong>
+      </div>
+      <div className="mini-panel wide-panel">
+        <span>Best Free Specialist</span>
+        <strong>{bestSpecialist}</strong>
       </div>
       <div className="mini-panel wide-panel">
         <span>Doctrine Pressure</span>
@@ -2156,6 +2492,7 @@ export function App() {
           {view === "world" ? <WorldMap /> : null}
           {view === "city" ? <CityView /> : null}
           {view === "research" ? <ResearchCanvas /> : null}
+          {view === "heroes" ? <HeroesView /> : null}
           <AlertStack />
         </div>
         <div className="right-column">

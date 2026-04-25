@@ -127,3 +127,11 @@ px tsc --noEmit passed. Browser/dev-server QA could not run in this environment 
 - Added a second layer of small, region-specific relic landmarks to the world map so named places carry more individual identity beyond their biome marker and large silhouette.
 - Each discovered region now gets a compact unique relic glyph with a subtle terrain-tinted backplate, offset deterministically around the region center to avoid stacking directly on the main signature.
 - Verification for this pass: npx tsc --noEmit passed. Dev-server/browser verification is blocked in this environment by the recurring Vite/esbuild spawn EPERM startup error.
+- Expanded the authored hex world from radius 4 to radius 5, adding a full new outer frontier ring and assigning those hexes to existing late-game regions such as Steam Fissures, Flooded Dam, Algae Salt Flats, Ash Farmland, and Petro Marsh.
+- Rebalanced outer-ring terrain mixing so the larger board uses more specific biome textures instead of falling back too often to neutral rock, making the map read as a more continuous toxic landscape.
+- Updated deterministic decor variant selection to use a fourth variant slot where terrain assets provide one, so existing `v4` tile art now appears on the board instead of being unused.
+- Smoothed the Hero/Expedition type bridge that was blocking verification after the hero system changed expedition data from pure staff missions toward hero-led missions.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.
+- Added a code-native detail texture layer to discovered world hexes so tiles show terrain-specific structure even when bitmap variants repeat.
+- Forests, wetlands, ruins, scraplands, waste pools, badlands, industrial zones, nests, fissures, dams, algae flats, ash fields, and rock now each render subtle linework or pooled forms over the bitmap texture.
+- Verification for this pass: npx tsc --noEmit passed, and the local server at http://127.0.0.1:4173 responded successfully.

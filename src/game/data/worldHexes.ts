@@ -1,6 +1,6 @@
 import type { HexCoord, HexTileDefinition, TerrainType } from "../types";
 
-const WORLD_RADIUS = 4;
+const WORLD_RADIUS = 5;
 
 const primaryTerrainByRegion: Record<string, TerrainType> = {
   "toxic-forest": "toxic-forest",
@@ -43,11 +43,11 @@ const regionCoords: Record<string, Array<[number, number]>> = {
   "mutant-nest": [[-3, 3], [-2, 3], [-1, 3], [0, 3]],
   "irradiated-fields": [[0, -3], [1, -3], [2, -3], [-1, -2]],
   "industrial-hulk": [[3, -3], [3, -2], [3, -1], [3, 0]],
-  "steam-fissures": [[0, -4], [1, -4], [2, -4], [3, -4], [4, -4]],
-  "flooded-dam": [[4, -3], [4, -2], [4, -1], [4, 0], [3, 1]],
-  "algae-salt-flats": [[2, 2], [1, 3], [0, 4], [-1, 4], [-2, 4]],
-  "ash-farmland": [[-3, 4], [-4, 4], [-4, 3], [-4, 2], [-4, 1]],
-  "petro-marsh": [[-4, 0], [-3, -1], [-2, -2], [-1, -3]]
+  "steam-fissures": [[0, -4], [1, -4], [2, -4], [3, -4], [4, -4], [0, -5], [1, -5], [2, -5], [3, -5], [4, -5]],
+  "flooded-dam": [[4, -3], [4, -2], [4, -1], [4, 0], [3, 1], [5, -5], [5, -4], [5, -3], [5, -2], [5, -1], [5, 0], [4, 1], [3, 2]],
+  "algae-salt-flats": [[2, 2], [1, 3], [0, 4], [-1, 4], [-2, 4], [2, 3], [1, 4], [0, 5], [-1, 5], [-2, 5]],
+  "ash-farmland": [[-3, 4], [-4, 4], [-4, 3], [-4, 2], [-4, 1], [-3, 5], [-4, 5], [-5, 5], [-5, 4], [-5, 3], [-5, 2], [-5, 1]],
+  "petro-marsh": [[-4, 0], [-3, -1], [-2, -2], [-1, -3], [-5, 0], [-4, -1], [-3, -2], [-2, -3], [-1, -4]]
 };
 
 function coordKey(coord: HexCoord) {
@@ -90,15 +90,15 @@ function resolveTerrainType(regionId: string, coord: HexCoord) {
   if (primary === "industrial-hulk" && noise <= 1) return "neutral-rock";
   if (primary === "overgrown-ruins" && noise === 2) return "neutral-rock";
   if (primary === "scavenger-scrapland" && noise === 1) return "neutral-rock";
-  if (primary === "chemical-waste" && ring >= 3 && noise >= 4) return "neutral-rock";
+  if (primary === "chemical-waste" && ring >= 3 && noise >= 4) return "petro-marsh";
   if (primary === "mutant-nest" && noise === 3) return "chemical-waste";
-  if (primary === "irradiated-badlands" && noise >= 5) return "neutral-rock";
-  if (primary === "toxic-forest" && ring >= 3 && noise >= 5) return "neutral-rock";
+  if (primary === "irradiated-badlands" && noise >= 5) return "steam-fissures";
+  if (primary === "toxic-forest" && ring >= 3 && noise >= 5) return "fungal-wetlands";
   if (primary === "petro-marsh" && noise >= 4) return "chemical-waste";
   if (primary === "steam-fissures" && noise >= 4) return "irradiated-badlands";
-  if (primary === "flooded-dam" && noise === 0) return "neutral-rock";
+  if (primary === "flooded-dam" && noise === 0) return "algae-salt-flats";
   if (primary === "algae-salt-flats" && noise <= 1) return "fungal-wetlands";
-  if (primary === "ash-farmland" && noise >= 5) return "neutral-rock";
+  if (primary === "ash-farmland" && noise >= 5) return "overgrown-ruins";
 
   return primary;
 }
@@ -133,7 +133,7 @@ export const worldHexes: HexTileDefinition[] = coords
       r: coord.r,
       terrainType: resolveTerrainType(regionId, coord),
       regionId,
-      decorVariant: Math.abs(coord.q * 5 + coord.r * 11) % 3,
+      decorVariant: Math.abs(coord.q * 5 + coord.r * 11 + ring * 7) % 4,
       dangerTint: dangerTintByRegion[regionId],
       isVisible: true
     };

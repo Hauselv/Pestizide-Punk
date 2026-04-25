@@ -40,9 +40,57 @@ describe("Pestizide Punk store", () => {
     const state = useGameStore.getState();
     state.launchExpedition("scavenger-run", "survey");
     expect(useGameStore.getState().expeditions.length).toBeGreaterThan(0);
+    expect(useGameStore.getState().expeditions[0]?.heroIds.length).toBeGreaterThan(0);
     state.advanceTime(30000);
     const region = useGameStore.getState().regions.find((item) => item.id === "scavenger-run");
     expect(region?.state).toBe("surveyed");
+    expect(useGameStore.getState().heroes.some((hero) => hero.xp > 0 || hero.level > 1)).toBe(true);
+  });
+
+  it("initializes heroes and hires from the city recruitment board", () => {
+    const state = useGameStore.getState();
+    expect(state.heroes.length).toBeGreaterThanOrEqual(3);
+    expect(state.heroCandidates).toHaveLength(3);
+    const beforeFood = state.resources.food;
+    const candidate = state.heroCandidates[0];
+    state.hireHero(candidate.id);
+    const updated = useGameStore.getState();
+    expect(updated.heroes.some((hero) => hero.name === candidate.name)).toBe(true);
+    expect(updated.heroCandidates.some((hero) => hero.id === candidate.id)).toBe(false);
+    expect(updated.resources.food).toBeLessThanOrEqual(beforeFood);
+  });
+
+  it("requires available heroes and marks them assigned during expeditions", () => {
+    const state = useGameStore.getState();
+    const heroIds = state.heroes.slice(0, 1).map((hero) => hero.id);
+    state.launchExpedition("scavenger-run", "survey", heroIds);
+    const active = useGameStore.getState();
+    expect(active.expeditions[0]?.heroIds).toEqual(heroIds);
+    expect(active.heroes.find((hero) => hero.id === heroIds[0])?.status).toBe("assigned");
+    active.launchExpedition("toxic-forest", "survey", heroIds);
+    expect(useGameStore.getState().expeditions).toHaveLength(1);
+  });
+
+  it("applies hero injuries and recovery timers after hazardous missions", () => {
+    const heroIds = useGameStore.getState().heroes.slice(0, 1).map((hero) => hero.id);
+    useGameStore.setState((state) => ({
+      ...state,
+      expeditions: [{
+        id: "forced-risk",
+        regionId: "mutant-nest",
+        kind: "survey",
+        remaining: 1,
+        total: 1,
+        heroIds,
+        risk: 1,
+        rewardScale: 1
+      }],
+      heroes: state.heroes.map((hero) => heroIds.includes(hero.id) ? { ...hero, status: "assigned", assignedExpeditionId: "forced-risk" } : hero)
+    }));
+    useGameStore.getState().advanceTime(2000);
+    const injured = useGameStore.getState().heroes.find((hero) => hero.id === heroIds[0]);
+    expect(["injured", "recovering"]).toContain(injured?.status);
+    expect(injured?.injury).toBeTruthy();
   });
 
   it("can toggle, upgrade, and specialize a city building", () => {
@@ -60,9 +108,9 @@ describe("Pestizide Punk store", () => {
     expect(useGameStore.getState().resources.materials).toBeLessThan(beforeMaterials);
   });
 
-  it("keeps world hexes attached to a region or the city core on radius four map", () => {
+  it("keeps world hexes attached to a region or the city core on radius five map", () => {
     const regionTiles = worldHexes.filter((tile) => !tile.isCityCore);
-    expect(worldRadius).toBe(4);
+    expect(worldRadius).toBe(5);
     expect(regionTiles.every((tile) => tile.regionId)).toBe(true);
     expect(worldHexes.some((tile) => tile.isCityCore)).toBe(true);
     expect(regionDefinitions).toHaveLength(13);

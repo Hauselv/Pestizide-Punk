@@ -14,7 +14,7 @@ export type ResourceId =
   | "gear";
 
 export type RoleId = "workers" | "technicians" | "researchers" | "rangers";
-export type ViewMode = "world" | "city" | "research";
+export type ViewMode = "world" | "city" | "research" | "heroes";
 export type HazardId = "toxicity" | "spores" | "radiation" | "infestation";
 export type ProtectionSlotId = "respiratory" | "chemical" | "radiation" | "environmental";
 export type DoctrineTag =
@@ -197,13 +197,44 @@ export interface ActiveResearch {
 
 export type ExpeditionKind = "survey" | "exploit" | "secure" | "outpost";
 
+export type HeroSkillId = "firstAid" | "exploration" | "engineering" | "combat" | "survival" | "science";
+export type HeroItemSlotId = "respiratory" | "body" | "tool" | "consumable";
+export type HeroStatus = "available" | "assigned" | "injured" | "recovering";
+
+export interface HeroItem {
+  id: string;
+  name: string;
+  slot: HeroItemSlotId;
+  durability: number;
+  protection?: ProtectionProfile;
+  skillBonus?: PartialRecord<HeroSkillId, number>;
+}
+
+export interface Hero {
+  id: string;
+  name: string;
+  archetype: string;
+  level: number;
+  xp: number;
+  skills: Record<HeroSkillId, number>;
+  traits: string[];
+  inventory: HeroItem[];
+  status: HeroStatus;
+  injury?: "light" | "heavy" | "critical";
+  injuredUntil?: number;
+  assignedExpeditionId?: string;
+  hireCost?: ResourceFlow;
+}
+
 export interface Expedition {
   id: string;
   regionId: string;
   kind: ExpeditionKind;
   remaining: number;
   total: number;
-  staff: StaffingCost;
+  heroIds: string[];
+  risk: number;
+  rewardScale: number;
 }
 
 export type EventId = "toxic-storm" | "swarm-raid" | "contamination-surge";
@@ -336,6 +367,9 @@ export interface SnapshotState {
   researched: string[];
   activeResearch: ActiveResearch | null;
   expeditions: Expedition[];
+  heroes: Hero[];
+  heroCandidates: Hero[];
+  nextHeroCandidateRefreshAt: number;
   activeEvent: ActiveEvent | null;
   pendingEvent: ActiveEvent | null;
   eventForecast: ScheduledEvent[];
